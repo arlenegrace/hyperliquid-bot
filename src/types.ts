@@ -4,6 +4,7 @@ export type PivotType = "high" | "low";
 export type RangeSource = "pivot-cluster" | "manual";
 export type OrderStatus = "pending" | "filled" | "cancelled";
 export type ManualRangeSetupKind = "initial-reclaim" | "edge-reentry";
+export type StrategyEntryMode = "standard" | "flip";
 export type SignalMetadataValue = string | number | boolean | undefined;
 
 export interface Candle {
@@ -104,6 +105,11 @@ export interface PositionCancellationRequest {
   note?: string;
 }
 
+export interface NetPositionSnapshot {
+  side: TradeSide;
+  sizeUnits: number;
+}
+
 export interface StrategySignal {
   strategyId: string;
   symbol: string;
@@ -121,6 +127,8 @@ export interface StrategySignal {
   maxRiskUsd?: number;
   positionSizeUsd?: number;
   setupKind?: ManualRangeSetupKind;
+  entryMode?: StrategyEntryMode;
+  netPositionBeforeEntry?: NetPositionSnapshot;
   metadata?: Record<string, SignalMetadataValue>;
 }
 
@@ -218,6 +226,8 @@ export interface PaperPosition {
   closeReason?: string;
   closedAt?: number;
   setupKind?: ManualRangeSetupKind;
+  entryMode?: StrategyEntryMode;
+  netPositionBeforeEntry?: NetPositionSnapshot;
   metadata?: Record<string, SignalMetadataValue>;
 }
 

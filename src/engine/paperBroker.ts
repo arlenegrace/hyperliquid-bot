@@ -120,6 +120,8 @@ export class PaperBroker {
       realizedPnlUsd: 0,
       status: "pending",
       ...(signal.setupKind ? { setupKind: signal.setupKind } : {}),
+      ...(signal.entryMode ? { entryMode: signal.entryMode } : {}),
+      ...(signal.netPositionBeforeEntry ? { netPositionBeforeEntry: signal.netPositionBeforeEntry } : {}),
       ...(signal.metadata ? { metadata: { ...signal.metadata } } : {}),
     };
 
@@ -130,6 +132,11 @@ export class PaperBroker {
       `${signal.symbol}: armed ${signal.side} ${signal.setupKind ?? "entry"} from ${entryOrders[0]?.price.toFixed(2)} to ${entryOrders.at(-1)?.price.toFixed(2)} with stop ${signal.stopLoss.toFixed(2)}.`,
       `${signal.symbol}: planned size ${intendedSizeUnits.toFixed(6)} units across ${entryOrders.length} entry orders${totalRiskUsd > 0 ? ` risking ${totalRiskUsd.toFixed(2)} USD at the stop` : ""}.`,
     ];
+    if (signal.entryMode === "flip" && signal.netPositionBeforeEntry) {
+      logs.push(
+        `${signal.symbol}: flip entry will flatten the current ${signal.netPositionBeforeEntry.side} of ${signal.netPositionBeforeEntry.sizeUnits.toFixed(6)} units before opening new ${signal.side} exposure.`,
+      );
+    }
 
     for (const order of position.entryOrders) {
       if (!orderIsMarketable(position.side, order.price, signal.entryReferencePrice)) {
@@ -345,6 +352,8 @@ export class PaperBroker {
     }
 
     const executedPrice = this.applyExecutionSlippage(position.side, order.price, "entry");
+    const logs =
+      position.entryMode === "flip" ? this.clearOppositeExposureForFlip(position, executedPrice, filledAt) : [];
     const feeUsd = this.calculateFeeUsd(executedPrice, order.sizeUnits);
 
     order.status = "filled";
@@ -363,9 +372,11 @@ export class PaperBroker {
     this.realizedPnlUsd -= feeUsd;
     this.totalFeesUsd += feeUsd;
 
-    return [
+    logs.push(
       `${position.symbol}: ${order.label} filled at ${executedPrice.toFixed(2)} for ${(order.sizeUnits * executedPrice).toFixed(2)} USD notional. Fee ${feeUsd.toFixed(2)} USD. Avg entry ${position.averageEntryPrice.toFixed(2)}.`,
-    ];
+    );
+
+    return logs;
   }
 
   private fillExitOrder(position: PaperPosition, order: PositionExitOrder, closedAt: number): string[] {
@@ -466,6 +477,45 @@ export class PaperBroker {
     this.cancelledPositions.push(clonePosition(position));
 
     return note ? [`${position.symbol}: ${closeReason}. ${note}`] : [`${position.symbol}: ${closeReason}.`];
+  }
+
+  private clearOppositeExposureForFlip(position: PaperPosition, fillPrice: number, filledAt: number): string[] {
+    const logs: string[] = [];
+    const oppositePositions = [...this.openPositions.values()].filter(
+      (candidate) =>
+        candidate.id !== position.id &&
+        candidate.symbol === position.symbol &&
+        candidate.strategyId === position.strategyId &&
+        candidate.side !== position.side,
+    );
+
+    for (const oppositePosition of oppositePositions) {
+      if (oppositePosition.status === "pending") {
+        logs.push(
+          ...this.cancelPosition(
+            oppositePosition,
+            filledAt,
+            `cancelled by opposing ${position.side} flip entry`,
+            "Pending orders on the old side were cancelled before opening the new net position.",
+          ),
+        );
+        continue;
+      }
+
+      if (oppositePosition.status === "open") {
+        logs.push(
+          ...this.closeRemainingPosition(
+            oppositePosition,
+            fillPrice,
+            filledAt,
+            `closed by opposing ${position.side} flip entry`,
+            "Hyperliquid nets one position per symbol, so the old side is flattened before the new side opens.",
+          ),
+        );
+      }
+    }
+
+    return logs;
   }
 
   private updateWinLossCounters(pnlUsd: number): void {

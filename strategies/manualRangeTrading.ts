@@ -1,5 +1,5 @@
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
-import { sumPositionStopRiskUsd } from "../src/risk.js";
+import { calculateSignalRiskBudgetUsd, getNetPositionSnapshot, isFlipSignal, sumPositionStopRiskUsd } from "../src/risk.js";
 import type {
   Candle,
   LadderLevelPlan,
@@ -10,12 +10,12 @@ import type {
   StrategyResult,
   TradingStrategy,
 } from "../src/types.js";
-import { buildRangeExitOrders } from "./ladderUtils.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const INITIAL_ENTRY_PCT = 0.1;
 const EDGE_ENTRY_PCTS = [0.1, 0.01] as const;
 const EDGE_RISK_FRACTIONS = [0.4, 0.6] as const;
+const MID_RANGE_EXIT_SIZE_FRACTION = 0.5;
 const STOP_DISTANCE_VETO_PCT = 0.5;
 const STOP_DISTANCE_VETO_LABEL = `${(STOP_DISTANCE_VETO_PCT * 100).toFixed(0)}%`;
 
@@ -60,6 +60,49 @@ function buildEdgeEntryOrders(side: TradeSide, rangeLow: number, rangeHigh: numb
       label: "Edge Entry 2",
       price: secondPrice,
       riskFraction: EDGE_RISK_FRACTIONS[1],
+    },
+  ];
+}
+
+function buildFlipEntryOrders(
+  side: TradeSide,
+  rangeLow: number,
+  rangeHigh: number,
+  firstEntryPriceOverride?: number,
+): LadderLevelPlan[] {
+  const edgeOrders = buildEdgeEntryOrders(side, rangeLow, rangeHigh);
+  const firstOrder = edgeOrders[0]!;
+  const secondOrder = edgeOrders[1]!;
+
+  return [
+    {
+      ...firstOrder,
+      label: firstEntryPriceOverride === undefined ? "Flip Entry 1" : "Flip Entry 1 (Immediate)",
+      price: firstEntryPriceOverride ?? firstOrder.price,
+    },
+    {
+      ...secondOrder,
+      label: "Flip Entry 2",
+    },
+  ];
+}
+
+function buildCampaignExitOrders(side: TradeSide, rangeLow: number, rangeHigh: number): LadderLevelPlan[] {
+  const width = rangeHigh - rangeLow;
+  const midPrice = rangeLow + width * 0.5;
+  const reversalTriggerPrice =
+    side === "long" ? rangeHigh - width * EDGE_ENTRY_PCTS[0] : rangeLow + width * EDGE_ENTRY_PCTS[0];
+
+  return [
+    {
+      label: "Take Profit 1",
+      price: midPrice,
+      sizeFraction: MID_RANGE_EXIT_SIZE_FRACTION,
+    },
+    {
+      label: "Take Profit 2",
+      price: reversalTriggerPrice,
+      sizeFraction: 1 - MID_RANGE_EXIT_SIZE_FRACTION,
     },
   ];
 }
@@ -222,7 +265,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
     const state = context.manualRangeState;
     const currentRiskUsd = sumPositionStopRiskUsd(context.openPositions);
     const maxRiskUsd = context.currentEquityUsd * context.config.manualRangeMaxRiskPct;
-    const remainingRiskUsd = Math.max(0, maxRiskUsd - currentRiskUsd);
+    const netPositionBeforeEntry = getNetPositionSnapshot(context.openPositions);
     const notes: string[] = [];
     const positionCancellations: PositionCancellationRequest[] = [];
 
@@ -230,9 +273,9 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
       state.activeOrderPlan &&
       !context.openPositions.some(
         (position) =>
-          position.status === "pending" &&
           position.setupKind === state.activeOrderPlan?.setupKind &&
-          position.side === state.activeOrderPlan?.side,
+          position.side === state.activeOrderPlan?.side &&
+          position.entryOrders.some((order) => order.status === "pending"),
       )
     ) {
       delete state.activeOrderPlan;
@@ -259,20 +302,10 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
       }
     }
 
-    if (remainingRiskUsd <= 0) {
-      notes.push(
-        `${context.symbol}: skipped ${this.id} because current worst-case stop loss is already ${currentRiskUsd.toFixed(2)} USD against the ${maxRiskUsd.toFixed(2)} USD cap.`,
-      );
-      return {
-        notes,
-        ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
-      };
-    }
-
     const reclaimEvent = findLatestManualReclaimEvent(activeCandles, state, range.low, range.high);
     if (reclaimEvent) {
       const hasPendingSameSidePosition = context.openPositions.some(
-        (position) => position.status === "pending" && position.side === reclaimEvent.side,
+        (position) => position.side === reclaimEvent.side && position.entryOrders.some((order) => order.status === "pending"),
       );
       if (hasPendingSameSidePosition) {
         notes.push(
@@ -292,18 +325,33 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
           `${context.symbol}: skipped ${reclaimEvent.side} reclaim because stop ${stopLoss.toFixed(2)} exceeds the ${STOP_DISTANCE_VETO_LABEL} max stop distance for range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
         );
       } else {
+        const flipSignal = isFlipSignal(reclaimEvent.side, context.openPositions);
+        const signalRiskUsd = calculateSignalRiskBudgetUsd(reclaimEvent.side, context.openPositions, maxRiskUsd);
+        if (signalRiskUsd <= 0) {
+          notes.push(
+            `${context.symbol}: skipped ${reclaimEvent.side} reclaim because current worst-case stop loss is already ${currentRiskUsd.toFixed(2)} USD against the ${maxRiskUsd.toFixed(2)} USD cap.`,
+          );
+          return {
+            notes,
+            ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
+          };
+        }
+
         const immediateFill = isWithinInitialBoundary(reclaimEvent.side, signalCandle.close, range.low, range.high);
         const entryPrice = immediateFill
           ? signalCandle.close
           : initialEntryPrice(reclaimEvent.side, range.low, range.high);
-        const exitStart =
-          reclaimEvent.side === "long"
-            ? range.low + range.width * context.config.ladderExitStartPct
-            : range.high - range.width * context.config.ladderExitStartPct;
-        const exitEnd =
-          reclaimEvent.side === "long"
-            ? range.low + range.width * context.config.ladderExitEndPct
-            : range.high - range.width * context.config.ladderExitEndPct;
+        const entryOrders = flipSignal
+          ? buildFlipEntryOrders(
+              reclaimEvent.side,
+              range.low,
+              range.high,
+              immediateFill ? signalCandle.close : undefined,
+            )
+          : buildInitialEntryOrders(reclaimEvent.side, entryPrice, immediateFill);
+        const pendingEntryPrices = entryOrders
+          .filter((order) => !immediateFill || order.price !== entryPrice)
+          .map((order) => order.price);
 
         if (reclaimEvent.side === "long") {
           state.lastLongReclaimTime = reclaimEvent.reclaimCandle.closeTime;
@@ -313,14 +361,14 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
           state.edgeReentryEnabledShort = true;
         }
 
-        if (!immediateFill) {
+        if (pendingEntryPrices.length > 0) {
           state.activeOrderPlan = {
             side: reclaimEvent.side,
             setupKind: "initial-reclaim",
             armedAt: signalCandle.closeTime,
             expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
-            entryPrices: [entryPrice],
-            cancelAtMidRange: true,
+            entryPrices: pendingEntryPrices,
+            cancelAtMidRange: !flipSignal,
           };
         } else if (
           state.activeOrderPlan?.setupKind === "initial-reclaim" &&
@@ -332,7 +380,9 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
         return {
           notes: [
             ...notes,
-            `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with ${(remainingRiskUsd).toFixed(2)} USD risk budget remaining.`,
+            flipSignal
+              ? `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} and will flatten the current ${netPositionBeforeEntry?.side ?? "opposite"} before opening new ${reclaimEvent.side} risk up to ${signalRiskUsd.toFixed(2)} USD.`
+              : `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with ${signalRiskUsd.toFixed(2)} USD risk budget remaining.`,
           ],
           ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
           signal: {
@@ -341,22 +391,28 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
             side: reclaimEvent.side,
             entryReferencePrice: signalCandle.close,
             stopLoss,
-            maxRiskUsd: remainingRiskUsd,
-            entryOrders: buildInitialEntryOrders(reclaimEvent.side, entryPrice, immediateFill),
-            exitOrders: buildRangeExitOrders(reclaimEvent.side, exitStart, exitEnd, context.config.ladderLevels),
+            maxRiskUsd: signalRiskUsd,
+            entryOrders,
+            exitOrders: buildCampaignExitOrders(reclaimEvent.side, range.low, range.high),
             range,
             triggerCandle: signalCandle,
             deviationCandle: reclaimEvent.deviationCandle,
             reason:
-              reclaimEvent.side === "long"
-                ? "Manual range saw a downside wick deviation and then a 4h close back inside the range."
-                : "Manual range saw an upside wick deviation and then a 4h close back inside the range.",
+              flipSignal
+                ? reclaimEvent.side === "long"
+                  ? "Manual range saw an upside campaign reach its reversal area, then a downside reclaim, so the next long fill should flatten the current short before reopening net long."
+                  : "Manual range saw a downside campaign reach its reversal area, then an upside reclaim, so the next short fill should flatten the current long before reopening net short."
+                : reclaimEvent.side === "long"
+                  ? "Manual range saw a downside wick deviation and then a 4h close back inside the range."
+                  : "Manual range saw an upside wick deviation and then a 4h close back inside the range.",
             generatedAt: signalCandle.closeTime,
             expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
             setupKind: "initial-reclaim",
+            entryMode: flipSignal ? "flip" : "standard",
+            ...(netPositionBeforeEntry ? { netPositionBeforeEntry } : {}),
             metadata: {
               immediateFill,
-              remainingRiskUsd: Number(remainingRiskUsd.toFixed(2)),
+              riskBudgetUsd: Number(signalRiskUsd.toFixed(2)),
             },
           },
         };
@@ -364,10 +420,10 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
     }
 
     const hasPendingLongPlan = context.openPositions.some(
-      (position) => position.status === "pending" && position.side === "long",
+      (position) => position.side === "long" && position.entryOrders.some((order) => order.status === "pending"),
     );
     const hasPendingShortPlan = context.openPositions.some(
-      (position) => position.status === "pending" && position.side === "short",
+      (position) => position.side === "short" && position.entryOrders.some((order) => order.status === "pending"),
     );
 
     const longEdgeTrigger =
@@ -385,6 +441,18 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
           `${context.symbol}: long edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${STOP_DISTANCE_VETO_LABEL} max stop distance.`,
         );
       } else {
+        const flipSignal = isFlipSignal("long", context.openPositions);
+        const signalRiskUsd = calculateSignalRiskBudgetUsd("long", context.openPositions, maxRiskUsd);
+        if (signalRiskUsd <= 0) {
+          notes.push(
+            `${context.symbol}: long edge re-entry skipped because current worst-case stop loss is already ${currentRiskUsd.toFixed(2)} USD against the ${maxRiskUsd.toFixed(2)} USD cap.`,
+          );
+          return {
+            notes,
+            ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
+          };
+        }
+
         state.activeOrderPlan = {
           side: "long",
           setupKind: "edge-reentry",
@@ -397,7 +465,9 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
         return {
           notes: [
             ...notes,
-            `${context.symbol}: armed long edge re-entry orders using the remaining ${remainingRiskUsd.toFixed(2)} USD stop-loss budget.`,
+            flipSignal
+              ? `${context.symbol}: armed long flip orders using up to ${signalRiskUsd.toFixed(2)} USD of new long risk after flattening the current short.`
+              : `${context.symbol}: armed long edge re-entry orders using the remaining ${signalRiskUsd.toFixed(2)} USD stop-loss budget.`,
           ],
           ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
           signal: {
@@ -406,23 +476,22 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
             side: "long",
             entryReferencePrice: signalCandle.close,
             stopLoss,
-            maxRiskUsd: remainingRiskUsd,
+            maxRiskUsd: signalRiskUsd,
             entryOrders: buildEdgeEntryOrders("long", range.low, range.high),
-            exitOrders: buildRangeExitOrders(
-              "long",
-              range.low + range.width * context.config.ladderExitStartPct,
-              range.low + range.width * context.config.ladderExitEndPct,
-              context.config.ladderLevels,
-            ),
+            exitOrders: buildCampaignExitOrders("long", range.low, range.high),
             range,
             triggerCandle: signalCandle,
             reason:
-              "Price previously deviated below the manual range, then reclaimed, and later crossed back into the upper half of the range to arm pullback bids.",
+              flipSignal
+                ? "Price rotated back into the lower half after an upside campaign, so the long ladder should flatten the current short before reopening net long."
+                : "Price previously deviated below the manual range, then reclaimed, and later crossed back into the upper half of the range to arm pullback bids.",
             generatedAt: signalCandle.closeTime,
             expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
             setupKind: "edge-reentry",
+            entryMode: flipSignal ? "flip" : "standard",
+            ...(netPositionBeforeEntry ? { netPositionBeforeEntry } : {}),
             metadata: {
-              remainingRiskUsd: Number(remainingRiskUsd.toFixed(2)),
+              riskBudgetUsd: Number(signalRiskUsd.toFixed(2)),
               riskSplit: "2:3",
             },
           },
@@ -445,6 +514,18 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
           `${context.symbol}: short edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${STOP_DISTANCE_VETO_LABEL} max stop distance.`,
         );
       } else {
+        const flipSignal = isFlipSignal("short", context.openPositions);
+        const signalRiskUsd = calculateSignalRiskBudgetUsd("short", context.openPositions, maxRiskUsd);
+        if (signalRiskUsd <= 0) {
+          notes.push(
+            `${context.symbol}: short edge re-entry skipped because current worst-case stop loss is already ${currentRiskUsd.toFixed(2)} USD against the ${maxRiskUsd.toFixed(2)} USD cap.`,
+          );
+          return {
+            notes,
+            ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
+          };
+        }
+
         state.activeOrderPlan = {
           side: "short",
           setupKind: "edge-reentry",
@@ -457,7 +538,9 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
         return {
           notes: [
             ...notes,
-            `${context.symbol}: armed short edge re-entry orders using the remaining ${remainingRiskUsd.toFixed(2)} USD stop-loss budget.`,
+            flipSignal
+              ? `${context.symbol}: armed short flip orders using up to ${signalRiskUsd.toFixed(2)} USD of new short risk after flattening the current long.`
+              : `${context.symbol}: armed short edge re-entry orders using the remaining ${signalRiskUsd.toFixed(2)} USD stop-loss budget.`,
           ],
           ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
           signal: {
@@ -466,23 +549,22 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
             side: "short",
             entryReferencePrice: signalCandle.close,
             stopLoss,
-            maxRiskUsd: remainingRiskUsd,
+            maxRiskUsd: signalRiskUsd,
             entryOrders: buildEdgeEntryOrders("short", range.low, range.high),
-            exitOrders: buildRangeExitOrders(
-              "short",
-              range.high - range.width * context.config.ladderExitStartPct,
-              range.high - range.width * context.config.ladderExitEndPct,
-              context.config.ladderLevels,
-            ),
+            exitOrders: buildCampaignExitOrders("short", range.low, range.high),
             range,
             triggerCandle: signalCandle,
             reason:
-              "Price previously deviated above the manual range, then reclaimed, and later crossed back into the lower half of the range to arm pullback offers.",
+              flipSignal
+                ? "Price rotated back into the upper half after a downside campaign, so the short ladder should flatten the current long before reopening net short."
+                : "Price previously deviated above the manual range, then reclaimed, and later crossed back into the lower half of the range to arm pullback offers.",
             generatedAt: signalCandle.closeTime,
             expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
             setupKind: "edge-reentry",
+            entryMode: flipSignal ? "flip" : "standard",
+            ...(netPositionBeforeEntry ? { netPositionBeforeEntry } : {}),
             metadata: {
-              remainingRiskUsd: Number(remainingRiskUsd.toFixed(2)),
+              riskBudgetUsd: Number(signalRiskUsd.toFixed(2)),
               riskSplit: "2:3",
             },
           },
