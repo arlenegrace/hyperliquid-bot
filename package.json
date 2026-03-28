@@ -1,0 +1,29 @@
+{
+  "name": "hl-bot",
+  "version": "1.0.0",
+  "description": "Simple modular Hyperliquid paper trading bot in TypeScript.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "backtest:compare": "tsx src/backtest/runStrategyComparison.ts",
+    "check": "tsx src/index.ts --once",
+    "dev": "tsx src/index.ts",
+    "research:range": "tsx src/analysis/rangeResearch.ts",
+    "start": "node dist/src/index.js"
+  },
+  "keywords": [
+    "hyperliquid",
+    "trading-bot",
+    "typescript"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
