@@ -9,7 +9,7 @@ const envSchema = z.object({
   HL_API_BASE_URL: z.url().default("https://api.hyperliquid.xyz"),
   WATCHLIST: z
     .string()
-    .default("BTC,ETH,SOL,CRV,XRP,SUI")
+    .default("BTC,ETH,SOL,CRV,BNB,XRP,SUI")
     .transform((value) =>
       value
         .split(",")

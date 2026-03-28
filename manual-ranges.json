@@ -20,6 +20,20 @@
       "rangeHigh": 89.709,
       "validFromTime": "2026-02-12T12:00:00.000Z",
       "notes": "SOL range based on the Feb 6 high and Feb 12 low."
+    },
+    {
+      "symbol": "CRV",
+      "rangeLow": 0.22479,
+      "rangeHigh": 0.264,
+      "validFromTime": "2026-02-11T12:00:00.000Z",
+      "notes": "CRV range: Feb 6 16:00 UTC high and Feb 11 12:00 UTC low."
+    },
+    {
+      "symbol": "BNB",
+      "rangeLow": 587.08,
+      "rangeHigh": 669.14,
+      "validFromTime": "2026-02-11T08:00:00.000Z",
+      "notes": "BNB range: Feb 6 16:00 UTC high and Feb 11 8:00 UTC low."
     }
   ]
 }
