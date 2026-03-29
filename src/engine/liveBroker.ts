@@ -399,11 +399,12 @@ export class HyperliquidLiveBroker implements Broker {
         ? Math.max(0, this.lastSyncTime - 60_000)
         : Math.max(0, this.getEarliestTrackedSignalTime() - 60_000);
 
-    const [accountSnapshot, openOrders, fills] = await Promise.all([
-      this.gateway.fetchAccountSnapshot(this.accountAddress),
-      this.gateway.fetchOpenOrders(this.accountAddress),
-      this.gateway.fetchFillsSince(this.accountAddress, fillStartTime, syncStartedAt),
-    ]);
+    try {
+      const [accountSnapshot, openOrders, fills] = await Promise.all([
+        this.gateway.fetchAccountSnapshot(this.accountAddress),
+        this.gateway.fetchOpenOrders(this.accountAddress),
+        this.gateway.fetchFillsSince(this.accountAddress, fillStartTime, syncStartedAt),
+      ]);
 
     this.currentAccountValueUsd = accountSnapshot.accountValueUsd;
     this.openExchangeOrderIds = new Set(
@@ -479,11 +480,17 @@ export class HyperliquidLiveBroker implements Broker {
 
     this.lastSyncTime = syncStartedAt;
     this.trimProcessedTradeIds();
-    logs.push(...(await this.ensureProtectiveOrders()));
-    await this.recordEquity(Object.fromEntries(this.lastMarks.entries()));
-    await this.saveState();
+      logs.push(...(await this.ensureProtectiveOrders()));
+      await this.recordEquity(Object.fromEntries(this.lastMarks.entries()));
+      await this.saveState();
 
-    return logs;
+      return logs;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return [
+        `Hyperliquid sync failed: ${message}. Using cached broker state for this cycle; will retry on the next tick.`,
+      ];
+    }
   }
 
   private applyEntryFill(position: BrokerPosition, order: PositionEntryOrder, fill: HyperliquidFill): void {

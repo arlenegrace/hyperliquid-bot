@@ -72,6 +72,12 @@ async function main(): Promise<void> {
     cycleRunning = true;
     try {
       await bot.runOnce();
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      console.error(`[bot] Cycle failed: ${message}`);
+      if (runOnceMode) {
+        throw error;
+      }
     } finally {
       cycleRunning = false;
     }
