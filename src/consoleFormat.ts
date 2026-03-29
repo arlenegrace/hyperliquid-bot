@@ -46,6 +46,21 @@ export function formatConsoleTimestamp(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
+/** Local wall time for bot logs, e.g. `01/31/2026 12:01:59 PM` (no comma between date and time). */
+export function formatBotCycleTimestamp(date: Date = new Date()): string {
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+  const year = date.getFullYear();
+  let hour24 = date.getHours();
+  const minute = pad2(date.getMinutes());
+  const second = pad2(date.getSeconds());
+  const ampm = hour24 >= 12 ? "PM" : "AM";
+  let hour12 = hour24 % 12;
+  if (hour12 === 0) hour12 = 12;
+  return `${month}/${day}/${year} ${hour12}:${minute}:${second} ${ampm}`;
+}
+
 export function normalizeConsoleMessage(symbol: string, message: string): string {
   const rawPrefix = `${symbol}:`;
   const formattedPrefix = `${formatConsoleSymbol(symbol)}:`;

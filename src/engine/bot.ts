@@ -1,5 +1,6 @@
 import { HyperliquidClient } from "../clients/hyperliquid.js";
 import {
+  formatBotCycleTimestamp,
   formatConsoleLabel,
   formatConsoleSymbol,
   formatConsoleSymbolListGreen,
@@ -48,7 +49,7 @@ export class TradingBot {
 
     const snapshot = this.broker.snapshot();
     console.log(
-      `[bot] Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, realized PnL: ${formatRealizedPnlUsdColored(snapshot.realizedPnlUsd)}.`,
+      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, realized PnL: ${formatRealizedPnlUsdColored(snapshot.realizedPnlUsd)}.`,
     );
     await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
   }
