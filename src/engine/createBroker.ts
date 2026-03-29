@@ -6,5 +6,5 @@ import { PaperBroker } from "./paperBroker.js";
 export function createBroker(config: BotConfig): Broker {
   return config.executionMode === "live"
     ? new HyperliquidLiveBroker(config, config.apiBaseUrl)
-    : new PaperBroker(config.paperStartingBalanceUsd, config.paperPositionSizeUsd);
+    : new PaperBroker(config.paperStartingBalanceUsd, config.positionSizeUsd);
 }

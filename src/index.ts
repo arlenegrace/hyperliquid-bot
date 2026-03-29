@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   const manualRanges = await loadManualRanges(config.manualRangeFile);
   const persistedStates = await loadManualRangeStates(config.manualRangeStateFile);
   const broker = createBroker(config);
-  const strategies = createStrategies();
+  const strategies = createStrategies(config.activeStrategyId);
   const bot = new TradingBot(config, marketDataClient, broker, strategies);
   const brokerLogs = await broker.initialize();
 
@@ -39,6 +39,7 @@ async function main(): Promise<void> {
   console.log(
     `[boot] Watchlist ${formatConsoleSymbolList(config.watchlist)} | interval ${config.interval} | lookback ${config.rangeLookbackCandles} candles.`,
   );
+  console.log(`[boot] Active strategy: ${strategies.map((strategy) => strategy.id).join(", ")}.`);
 
   const rangeStatuses = config.watchlist.map((symbol) => {
     const manualRange = getManualRangeForSymbol(manualRanges, symbol);

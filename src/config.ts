@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import { z } from "zod";
 
-import type { BotConfig } from "./types.js";
+import type { ActiveStrategyId, BotConfig } from "./types.js";
 
 dotenv.config();
 
@@ -41,11 +41,15 @@ const envSchema = z.object({
         .filter(Boolean),
     )
     .pipe(z.array(z.string()).min(1, "WATCHLIST must contain at least one symbol.")),
-  POLL_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),
+  POLL_INTERVAL_MS: z.coerce.number().int().min(5_000).default(30_000),
   EXECUTION_MODE: z.enum(["paper", "live"]).default("paper"),
+  ACTIVE_STRATEGY: z
+    .enum(["manual-range-trading-v1", "manual-range-trading-v2"])
+    .default("manual-range-trading-v1")
+    .transform((value) => value as ActiveStrategyId),
   RANGE_LOOKBACK_CANDLES: z.coerce.number().int().min(5).max(5_000).default(500),
   PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(10_000),
-  PAPER_POSITION_SIZE_USD: z.coerce.number().positive().default(250),
+  POSITION_SIZE_USD: z.coerce.number().positive().default(20),
   LIVE_TRADING_ENABLED: booleanEnv(false),
   LIVE_DRY_RUN: booleanEnv(true),
   HL_USE_TESTNET: booleanEnv(false),
@@ -54,8 +58,8 @@ const envSchema = z.object({
   LIVE_STATE_FILE: z.string().default(".live-broker-state.json"),
   LIVE_DEFAULT_LEVERAGE: leverageEnv,
   LIVE_MARGIN_MODE: z.enum(["cross", "isolated"]).default("cross"),
-  LIVE_MAX_NOTIONAL_USD: z.coerce.number().positive().default(1_000),
-  LIVE_MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(3),
+  LIVE_MAX_NOTIONAL_USD: z.coerce.number().positive().default(5_000),
+  LIVE_MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(10),
   LIVE_SLIPPAGE_BPS: z.coerce.number().min(0).max(500).default(10),
   LIVE_ORDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   MANUAL_RANGE_MAX_RISK_PCT: z.coerce.number().positive().max(0.25).default(0.05),
@@ -89,7 +93,7 @@ const envSchema = z.object({
     .pipe(z.array(z.string()).min(1, "BACKTEST_SYMBOLS must contain at least one symbol.")),
   BACKTEST_LOOKBACK_CANDLES: z.coerce.number().int().min(200).max(5_000).default(900),
   BACKTEST_TRADING_FEE_RATE: z.coerce.number().min(0).max(0.01).default(0.00045),
-  BACKTEST_SLIPPAGE_RATE: z.coerce.number().min(0).max(0.01).default(0.0001),
+  BACKTEST_SLIPPAGE_RATE: z.coerce.number().min(0).max(0.01).default(0.001),
 });
 
 export function loadConfig(): BotConfig {
@@ -108,9 +112,10 @@ export function loadConfig(): BotConfig {
     watchlist: env.WATCHLIST,
     pollIntervalMs: env.POLL_INTERVAL_MS,
     executionMode: env.EXECUTION_MODE,
+    activeStrategyId: env.ACTIVE_STRATEGY,
     rangeLookbackCandles: env.RANGE_LOOKBACK_CANDLES,
     paperStartingBalanceUsd: env.PAPER_STARTING_BALANCE_USD,
-    paperPositionSizeUsd: env.PAPER_POSITION_SIZE_USD,
+    positionSizeUsd: env.POSITION_SIZE_USD,
     live: {
       enabled: env.LIVE_TRADING_ENABLED,
       dryRun: env.LIVE_DRY_RUN,

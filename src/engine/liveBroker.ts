@@ -224,7 +224,7 @@ export class HyperliquidLiveBroker implements Broker {
   async openPosition(signal: StrategySignal): Promise<string[]> {
     await this.assertInitialized();
     const logs: string[] = [];
-    const entryOrders = buildPlannedEntryOrders(signal, this.config.paperPositionSizeUsd);
+    const entryOrders = buildPlannedEntryOrders(signal, this.config.positionSizeUsd);
     const intendedSizeUnits = entryOrders.reduce((sum, order) => sum + order.sizeUnits, 0);
     const intendedNotionalUsd = calculatePlannedEntryNotionalUsd(entryOrders);
 

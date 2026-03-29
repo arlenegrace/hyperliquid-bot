@@ -1,4 +1,4 @@
-import type { TradingStrategy } from "../src/types.js";
+import type { ActiveStrategyId, TradingStrategy } from "../src/types.js";
 import { AnchoredRangeLadderStrategy } from "./anchoredRangeLadder.js";
 import { ManualRangeTradingStrategy } from "./manualRangeTrading.js";
 import { ManualRangeTradingV1Strategy } from "./manualRangeTradingV1.js";
@@ -15,6 +15,11 @@ export function createAllStrategies(): TradingStrategy[] {
   ];
 }
 
-export function createStrategies(): TradingStrategy[] {
-  return [new ManualRangeTradingV2Strategy()];
+export function createStrategies(activeStrategyId: ActiveStrategyId): TradingStrategy[] {
+  switch (activeStrategyId) {
+    case "manual-range-trading-v1":
+      return [new ManualRangeTradingV1Strategy()];
+    case "manual-range-trading-v2":
+      return [new ManualRangeTradingV2Strategy()];
+  }
 }

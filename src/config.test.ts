@@ -51,8 +51,10 @@ test("loadConfig parses live trading flags and limits", () => {
   withEnv(
     {
       EXECUTION_MODE: "live",
+      ACTIVE_STRATEGY: "manual-range-trading-v1",
       HL_PRIVATE_KEY: LIVE_PRIVATE_KEY,
       HL_ACCOUNT_ADDRESS: LIVE_ACCOUNT_ADDRESS,
+      POSITION_SIZE_USD: "20",
       LIVE_TRADING_ENABLED: "true",
       LIVE_DRY_RUN: "false",
       HL_USE_TESTNET: "true",
@@ -64,6 +66,8 @@ test("loadConfig parses live trading flags and limits", () => {
     () => {
       const config = loadConfig();
       assert.equal(config.executionMode, "live");
+      assert.equal(config.activeStrategyId, "manual-range-trading-v1");
+      assert.equal(config.positionSizeUsd, 20);
       assert.equal(config.live.enabled, true);
       assert.equal(config.live.dryRun, false);
       assert.equal(config.live.useTestnet, true);
@@ -88,6 +92,7 @@ test("loadConfig accepts max leverage and keeps cross margin by default", () => 
     },
     () => {
       const config = loadConfig();
+      assert.equal(config.activeStrategyId, "manual-range-trading-v2");
       assert.equal(config.live.defaultLeverage, "max");
       assert.equal(config.live.marginMode, "cross");
     },

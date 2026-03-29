@@ -367,7 +367,7 @@ async function main(): Promise<void> {
       candlesBySymbol,
       manualRanges,
       config.paperStartingBalanceUsd,
-      config.paperPositionSizeUsd,
+      config.positionSizeUsd,
       config.backtestTradingFeeRate,
       config.backtestSlippageRate,
       ),

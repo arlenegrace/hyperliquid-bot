@@ -13,9 +13,10 @@ function createConfig(): BotConfig {
     watchlist: ["BTC"],
     pollIntervalMs: 60_000,
     executionMode: "paper",
+    activeStrategyId: "manual-range-trading-v2",
     rangeLookbackCandles: 500,
     paperStartingBalanceUsd: 2_000,
-    paperPositionSizeUsd: 100,
+    positionSizeUsd: 100,
     live: {
       enabled: false,
       dryRun: true,

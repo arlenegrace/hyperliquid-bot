@@ -87,7 +87,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
             "Original manual range logic: a 4h close deviated below the range and a later closed 4h candle reclaimed back inside it.",
           generatedAt: signalCandle.closeTime,
           expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
-          positionSizeUsd: context.config.paperPositionSizeUsd,
+          positionSizeUsd: context.config.positionSizeUsd,
         },
       };
     }
@@ -115,7 +115,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
           "Original manual range logic: a 4h close deviated above the range and a later closed 4h candle reclaimed back inside it.",
         generatedAt: signalCandle.closeTime,
         expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
-        positionSizeUsd: context.config.paperPositionSizeUsd,
+        positionSizeUsd: context.config.positionSizeUsd,
       },
     };
   }
