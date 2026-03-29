@@ -149,15 +149,22 @@ export class HyperliquidLiveBroker implements Broker {
       );
     }
 
+    const leverageLogs: string[] = [];
     for (const symbol of this.config.watchlist) {
-      await this.gateway.ensureLeverage(symbol, this.config.live.defaultLeverage, this.config.live.marginMode);
+      const appliedLeverage = await this.gateway.ensureLeverage(
+        symbol,
+        this.config.live.defaultLeverage,
+        this.config.live.marginMode,
+      );
+      leverageLogs.push(`${symbol}: configured ${this.config.live.marginMode} ${appliedLeverage}x leverage.`);
     }
 
     this.initialized = true;
     await this.saveState();
 
     return [
-      `live broker initialized for ${this.accountAddress} with ${this.config.live.marginMode} ${this.config.live.defaultLeverage}x leverage.`,
+      `live broker initialized for ${this.accountAddress} using ${this.config.live.marginMode} margin.`,
+      ...leverageLogs,
       this.config.live.dryRun
         ? "dry-run mode is active; exchange writes are disabled."
         : this.config.live.enabled

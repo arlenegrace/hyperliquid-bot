@@ -76,3 +76,20 @@ test("loadConfig parses live trading flags and limits", () => {
     },
   );
 });
+
+test("loadConfig accepts max leverage and keeps cross margin by default", () => {
+  withEnv(
+    {
+      EXECUTION_MODE: "live",
+      HL_PRIVATE_KEY: LIVE_PRIVATE_KEY,
+      HL_ACCOUNT_ADDRESS: LIVE_ACCOUNT_ADDRESS,
+      LIVE_DEFAULT_LEVERAGE: "max",
+      LIVE_MARGIN_MODE: undefined,
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.live.defaultLeverage, "max");
+      assert.equal(config.live.marginMode, "cross");
+    },
+  );
+});

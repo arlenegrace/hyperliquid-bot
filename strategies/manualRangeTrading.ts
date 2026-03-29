@@ -16,8 +16,12 @@ const INITIAL_ENTRY_PCT = 0.1;
 const EDGE_ENTRY_PCTS = [0.1, 0.01] as const;
 const EDGE_RISK_FRACTIONS = [0.4, 0.6] as const;
 const MID_RANGE_EXIT_SIZE_FRACTION = 0.5;
-const STOP_DISTANCE_VETO_PCT = 0.5;
-const STOP_DISTANCE_VETO_LABEL = `${(STOP_DISTANCE_VETO_PCT * 100).toFixed(0)}%`;
+
+function maxStopExtensionLabel(maxExtensionPct: number): string {
+  const pct = maxExtensionPct * 100;
+  const text = Number.isInteger(pct) ? pct.toFixed(0) : pct.toFixed(1).replace(/\.0$/, "");
+  return `${text}%`;
+}
 
 interface ManualReclaimEvent {
   side: TradeSide;
@@ -111,13 +115,19 @@ function calculateStopLoss(side: TradeSide, state: ManualRangeState): number | u
   return side === "long" ? state.lowestLowSinceValidFrom : state.highestHighSinceValidFrom;
 }
 
-function stopLossTooWide(side: TradeSide, stopLoss: number, rangeLow: number, rangeHigh: number): boolean {
+function stopLossTooWide(
+  side: TradeSide,
+  stopLoss: number,
+  rangeLow: number,
+  rangeHigh: number,
+  maxExtensionPct: number,
+): boolean {
   const rangeWidth = rangeHigh - rangeLow;
   if (side === "long") {
-    return rangeLow - stopLoss > rangeWidth * STOP_DISTANCE_VETO_PCT;
+    return rangeLow - stopLoss > rangeWidth * maxExtensionPct;
   }
 
-  return stopLoss - rangeHigh > rangeWidth * STOP_DISTANCE_VETO_PCT;
+  return stopLoss - rangeHigh > rangeWidth * maxExtensionPct;
 }
 
 function isWithinInitialBoundary(side: TradeSide, closePrice: number, rangeLow: number, rangeHigh: number): boolean {
@@ -320,9 +330,11 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
       const stopLoss = calculateStopLoss(reclaimEvent.side, state);
       if (stopLoss === undefined) {
         notes.push(`${context.symbol}: reclaim detected but stop-loss history is missing for ${reclaimEvent.side}.`);
-      } else if (stopLossTooWide(reclaimEvent.side, stopLoss, range.low, range.high)) {
+      } else if (
+        stopLossTooWide(reclaimEvent.side, stopLoss, range.low, range.high, context.config.manualRangeMaxStopExtensionPct)
+      ) {
         notes.push(
-          `${context.symbol}: skipped ${reclaimEvent.side} reclaim because stop ${stopLoss.toFixed(2)} exceeds the ${STOP_DISTANCE_VETO_LABEL} max stop distance for range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: skipped ${reclaimEvent.side} reclaim because stop ${stopLoss.toFixed(2)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance for range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
         );
       } else {
         const flipSignal = isFlipSignal(reclaimEvent.side, context.openPositions);
@@ -436,9 +448,11 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
       const stopLoss = calculateStopLoss("long", state);
       if (stopLoss === undefined) {
         notes.push(`${context.symbol}: long edge re-entry skipped because no downside stop reference exists yet.`);
-      } else if (stopLossTooWide("long", stopLoss, range.low, range.high)) {
+      } else if (
+        stopLossTooWide("long", stopLoss, range.low, range.high, context.config.manualRangeMaxStopExtensionPct)
+      ) {
         notes.push(
-          `${context.symbol}: long edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${STOP_DISTANCE_VETO_LABEL} max stop distance.`,
+          `${context.symbol}: long edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance.`,
         );
       } else {
         const flipSignal = isFlipSignal("long", context.openPositions);
@@ -509,9 +523,11 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
       const stopLoss = calculateStopLoss("short", state);
       if (stopLoss === undefined) {
         notes.push(`${context.symbol}: short edge re-entry skipped because no upside stop reference exists yet.`);
-      } else if (stopLossTooWide("short", stopLoss, range.low, range.high)) {
+      } else if (
+        stopLossTooWide("short", stopLoss, range.low, range.high, context.config.manualRangeMaxStopExtensionPct)
+      ) {
         notes.push(
-          `${context.symbol}: short edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${STOP_DISTANCE_VETO_LABEL} max stop distance.`,
+          `${context.symbol}: short edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance.`,
         );
       } else {
         const flipSignal = isFlipSignal("short", context.openPositions);

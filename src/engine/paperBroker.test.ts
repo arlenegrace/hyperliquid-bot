@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ManualRangeTradingStrategy } from "../../strategies/manualRangeTrading.js";
+import { ManualRangeTradingV1Strategy } from "../../strategies/manualRangeTradingV1.js";
 import { PaperBroker } from "./paperBroker.js";
 import type { BotConfig, Candle, ManualRangeState, PaperPosition, StrategySignal } from "../types.js";
 
@@ -46,6 +47,7 @@ function createConfig(): BotConfig {
     manualRangeFile: "manual-ranges.json",
     manualRangeStateFile: "manual-range-state.json",
     manualRangeInvalidationExtendPct: 0.5,
+    manualRangeMaxStopExtensionPct: 0.5,
     manualRangeMaxRiskPct: 0.05,
     backtestTradingFeeRate: 0,
     backtestSlippageRate: 0,
@@ -292,4 +294,148 @@ test("paper broker closes a short before opening a flip long", async () => {
   assert.equal(snapshot.openPositions[0]?.remainingSizeUnits, 20);
   assert.equal(snapshot.closedPositions.length, 1);
   assert.equal(snapshot.closedPositions[0]?.side, "short");
+});
+
+test("paper broker keeps a partially exited position open until size reaches zero", async () => {
+  const broker = new PaperBroker(2_000, 100);
+  await broker.initialize();
+
+  await broker.openPosition(
+    createSignal({
+      strategyId: "manual-range-trading-v1",
+      side: "long",
+      entryReferencePrice: 100,
+      stopLoss: 95,
+      maxRiskUsd: 100,
+      entryOrders: [{ label: "Long Entry", price: 100, riskFraction: 1 }],
+      exitOrders: [
+        { label: "Take Profit 1", price: 110, sizeFraction: 0.5 },
+        { label: "Take Profit 2", price: 118, sizeFraction: 0.5 },
+      ],
+    }),
+  );
+
+  await broker.processCandle(
+    "BTC",
+    createCandle({
+      openTime: 3,
+      closeTime: 4,
+      open: 109,
+      high: 111,
+      low: 109,
+      close: 110,
+    }),
+  );
+
+  const snapshot = broker.snapshot();
+  assert.equal(broker.hasOpenPosition("BTC", "manual-range-trading-v1"), true);
+  assert.equal(snapshot.openPositions.length, 1);
+  assert.equal(snapshot.openPositions[0]?.status, "open");
+  assert.equal(snapshot.openPositions[0]?.remainingSizeUnits, 10);
+  assert.equal(snapshot.closedPositions.length, 0);
+});
+
+test("manual range v1 does not switch sides until the broker reports flat", () => {
+  const strategy = new ManualRangeTradingV1Strategy();
+  const config = createConfig();
+  const partiallyReducedLong = createOpenPosition({
+    strategyId: "manual-range-trading-v1",
+    remainingSizeUnits: 5,
+    exitOrders: [
+      {
+        label: "Take Profit 1",
+        price: 110,
+        sizeFraction: 0.5,
+        sizeUnits: 5,
+        status: "filled",
+        filledSizeUnits: 5,
+        averageFillPrice: 110,
+        hitAt: 4,
+      },
+      {
+        label: "Take Profit 2",
+        price: 118,
+        sizeFraction: 0.5,
+        sizeUnits: 5,
+        status: "pending",
+      },
+    ],
+  });
+
+  const result = strategy.evaluate({
+    symbol: "BTC",
+    candles: [
+      createCandle({
+        openTime: 10,
+        closeTime: 11,
+        open: 120.5,
+        high: 121.5,
+        low: 120.2,
+        close: 121,
+      }),
+      createCandle({
+        openTime: 12,
+        closeTime: 13,
+        open: 119,
+        high: 119.2,
+        low: 117.5,
+        close: 118,
+      }),
+    ],
+    config,
+    hasOpenPosition: true,
+    openPositions: [partiallyReducedLong],
+    currentEquityUsd: 2_000,
+    manualRange: {
+      symbol: "BTC",
+      rangeLow: 100,
+      rangeHigh: 120,
+      validFromTime: 0,
+    },
+  });
+
+  assert.equal(result.signal, undefined);
+  assert.match(
+    result.notes[0] ?? "",
+    /only re-arms after the current net position is fully flat/i,
+  );
+});
+
+test("manual range v1 can take the opposite reclaim once the prior position is fully closed", () => {
+  const strategy = new ManualRangeTradingV1Strategy();
+  const config = createConfig();
+  const result = strategy.evaluate({
+    symbol: "BTC",
+    candles: [
+      createCandle({
+        openTime: 10,
+        closeTime: 11,
+        open: 120.5,
+        high: 121.5,
+        low: 120.2,
+        close: 121,
+      }),
+      createCandle({
+        openTime: 12,
+        closeTime: 13,
+        open: 119,
+        high: 119.2,
+        low: 117.5,
+        close: 118,
+      }),
+    ],
+    config,
+    hasOpenPosition: false,
+    openPositions: [],
+    currentEquityUsd: 2_000,
+    manualRange: {
+      symbol: "BTC",
+      rangeLow: 100,
+      rangeHigh: 120,
+      validFromTime: 0,
+    },
+  });
+
+  assert.ok(result.signal, "expected the opposite-side reclaim after the prior position is flat");
+  assert.equal(result.signal.side, "short");
 });

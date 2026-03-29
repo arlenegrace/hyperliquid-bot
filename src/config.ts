@@ -14,6 +14,11 @@ const booleanEnv = (defaultValue: boolean) =>
       .transform((value) => ["true", "1", "yes", "on"].includes(value)),
   );
 
+const leverageEnv = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
+  z.union([z.literal("max"), z.coerce.number().int().min(1).max(100)]).default("max"),
+);
+
 const ethereumAddressSchema = z
   .string()
   .regex(/^0x[a-fA-F0-9]{40}$/, "Expected an Ethereum address like 0xabc...")
@@ -47,13 +52,14 @@ const envSchema = z.object({
   HL_ACCOUNT_ADDRESS: ethereumAddressSchema.optional(),
   HL_PRIVATE_KEY: privateKeySchema.optional(),
   LIVE_STATE_FILE: z.string().default(".live-broker-state.json"),
-  LIVE_DEFAULT_LEVERAGE: z.coerce.number().int().min(1).max(100).default(3),
+  LIVE_DEFAULT_LEVERAGE: leverageEnv,
   LIVE_MARGIN_MODE: z.enum(["cross", "isolated"]).default("cross"),
   LIVE_MAX_NOTIONAL_USD: z.coerce.number().positive().default(1_000),
   LIVE_MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(3),
   LIVE_SLIPPAGE_BPS: z.coerce.number().min(0).max(500).default(10),
   LIVE_ORDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   MANUAL_RANGE_MAX_RISK_PCT: z.coerce.number().positive().max(0.25).default(0.05),
+  MANUAL_RANGE_MAX_STOP_EXTENSION_PCT: z.coerce.number().positive().max(2).default(0.5),
   STOP_BUFFER_PCT: z.coerce.number().positive().max(0.05).default(0.001),
   PIVOT_STRENGTH: z.coerce.number().int().min(1).max(10).default(3),
   PIVOT_CLUSTER_TOLERANCE_PCT: z.coerce.number().positive().max(0.05).default(0.012),
@@ -137,6 +143,7 @@ export function loadConfig(): BotConfig {
     manualRangeFile: env.MANUAL_RANGE_FILE,
     manualRangeStateFile: env.MANUAL_RANGE_STATE_FILE,
     manualRangeInvalidationExtendPct: env.MANUAL_RANGE_INVALIDATION_EXTEND_PCT,
+    manualRangeMaxStopExtensionPct: env.MANUAL_RANGE_MAX_STOP_EXTENSION_PCT,
     backtestSymbols: env.BACKTEST_SYMBOLS,
     backtestLookbackCandles: env.BACKTEST_LOOKBACK_CANDLES,
     backtestTradingFeeRate: env.BACKTEST_TRADING_FEE_RATE,

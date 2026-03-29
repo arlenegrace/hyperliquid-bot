@@ -47,6 +47,7 @@ function createConfig(executionMode: "paper" | "live"): BotConfig {
     manualRangeFile: "manual-ranges.json",
     manualRangeStateFile: ".manual-range-state.json",
     manualRangeInvalidationExtendPct: 0.5,
+    manualRangeMaxStopExtensionPct: 0.5,
     manualRangeMaxRiskPct: 0.05,
     backtestTradingFeeRate: 0,
     backtestSlippageRate: 0,

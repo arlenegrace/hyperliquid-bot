@@ -286,6 +286,33 @@ function rankResults(results: StrategyComparisonRow[]): StrategyComparisonRow[] 
   });
 }
 
+function printFilledTradeDetectionsForStrategy(
+  strategyResult: StrategyBacktestResult | undefined,
+  strategyId: string,
+  symbols: string[],
+): void {
+  if (!strategyResult) {
+    return;
+  }
+
+  console.log(
+    `[backtest] ${strategyId} filled trades during the ${formatConsoleSymbolList(symbols)} research window:`,
+  );
+  for (const symbol of symbols) {
+    const detections = strategyResult.filledTradeDetections[symbol] ?? [];
+    if (detections.length === 0) {
+      console.log(`[backtest] ${formatConsoleSymbol(symbol)} ${strategyId} filled trades: none`);
+      continue;
+    }
+    console.log(`[backtest] ${formatConsoleSymbol(symbol)} ${strategyId} filled trades:`);
+    for (const line of detections) {
+      const color = ansiColorForDetectionLine(line);
+      const reset = color ? DETECTION_COLOR_RESET : "";
+      console.log(`${color}   ${line}${reset}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const client = new HyperliquidClient(config.apiBaseUrl);
@@ -335,25 +362,21 @@ async function main(): Promise<void> {
     );
   }
 
-  const manualRangeResult = results.find((result) => result.summary.strategyId === "manual-range-trading");
-  if (manualRangeResult) {
-    console.log(
-      `[backtest] Manual range filled trades during the ${formatConsoleSymbolList(symbols)} research window:`,
-    );
-    for (const symbol of symbols) {
-      const detections = manualRangeResult.filledTradeDetections[symbol] ?? [];
-      if (detections.length === 0) {
-        console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading filled trades: none`);
-        continue;
-      }
-      console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading filled trades:`);
-      for (const line of detections) {
-        const color = ansiColorForDetectionLine(line);
-        const reset = color ? DETECTION_COLOR_RESET : "";
-        console.log(`${color}   ${line}${reset}`);
-      }
-    }
-  }
+  printFilledTradeDetectionsForStrategy(
+    results.find((result) => result.summary.strategyId === "manual-range-trading"),
+    "manual-range-trading",
+    symbols,
+  );
+  printFilledTradeDetectionsForStrategy(
+    results.find((result) => result.summary.strategyId === "manual-range-trading-v1"),
+    "manual-range-trading-v1",
+    symbols,
+  );
+  printFilledTradeDetectionsForStrategy(
+    results.find((result) => result.summary.strategyId === "manual-range-trading-v2"),
+    "manual-range-trading-v2",
+    symbols,
+  );
 
   const winner = rankedResults[0];
   if (winner) {

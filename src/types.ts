@@ -5,6 +5,7 @@ export type RangeSource = "pivot-cluster" | "manual";
 export type OrderStatus = "pending" | "filled" | "cancelled";
 export type ExecutionMode = "paper" | "live";
 export type MarginMode = "cross" | "isolated";
+export type LeverageSetting = number | "max";
 export type ManualRangeSetupKind = "initial-reclaim" | "edge-reentry";
 export type StrategyEntryMode = "standard" | "flip";
 export type SignalMetadataValue = string | number | boolean | undefined;
@@ -119,7 +120,7 @@ export interface LiveTradingConfig {
   accountAddress?: `0x${string}`;
   privateKey?: `0x${string}`;
   stateFile: string;
-  defaultLeverage: number;
+  defaultLeverage: LeverageSetting;
   marginMode: MarginMode;
   maxNotionalUsd: number;
   maxOpenPositions: number;
@@ -185,6 +186,8 @@ export interface BotConfig {
   manualRangeStateFile: string;
   /** Extension beyond range low/high as a fraction of range width (e.g. 0.5 = half-width buffer). */
   manualRangeInvalidationExtendPct: number;
+  /** Max distance from range boundary to stop, as a fraction of range width (e.g. 0.25 = 25% of width beyond the edge). */
+  manualRangeMaxStopExtensionPct: number;
   manualRangeMaxRiskPct: number;
   backtestTradingFeeRate: number;
   backtestSlippageRate: number;

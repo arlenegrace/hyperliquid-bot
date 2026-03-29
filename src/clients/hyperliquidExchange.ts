@@ -2,7 +2,7 @@ import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { SymbolConverter, formatPrice, formatSize } from "@nktkas/hyperliquid/utils";
 import { privateKeyToAccount } from "viem/accounts";
 
-import type { LiveTradingConfig, MarginMode, TradeSide } from "../types.js";
+import type { LeverageSetting, LiveTradingConfig, MarginMode, TradeSide } from "../types.js";
 
 export interface HyperliquidAssetInfo {
   symbol: string;
@@ -85,6 +85,20 @@ function normalizeWalletAddress(address: string): `0x${string}` {
   return address.toLowerCase() as `0x${string}`;
 }
 
+function resolveLeverageSetting(leverageSetting: LeverageSetting, assetInfo: HyperliquidAssetInfo): number {
+  if (leverageSetting === "max") {
+    return assetInfo.maxLeverage;
+  }
+
+  if (leverageSetting > assetInfo.maxLeverage) {
+    throw new Error(
+      `${assetInfo.symbol} max leverage is ${assetInfo.maxLeverage}x, but LIVE_DEFAULT_LEVERAGE is ${leverageSetting}x.`,
+    );
+  }
+
+  return leverageSetting;
+}
+
 export class HyperliquidExchangeGateway {
   private readonly transport: HttpTransport;
   private readonly infoClient: InfoClient;
@@ -162,18 +176,14 @@ export class HyperliquidExchangeGateway {
     return assetInfo;
   }
 
-  async ensureLeverage(symbol: string, leverage: number, marginMode: MarginMode): Promise<void> {
+  async ensureLeverage(symbol: string, leverageSetting: LeverageSetting, marginMode: MarginMode): Promise<number> {
     const normalizedSymbol = symbol.toUpperCase();
     if (this.leverageConfiguredSymbols.has(normalizedSymbol)) {
-      return;
+      return resolveLeverageSetting(leverageSetting, this.getAssetInfo(normalizedSymbol));
     }
 
     const assetInfo = this.getAssetInfo(normalizedSymbol);
-    if (leverage > assetInfo.maxLeverage) {
-      throw new Error(
-        `${normalizedSymbol} max leverage is ${assetInfo.maxLeverage}x, but LIVE_DEFAULT_LEVERAGE is ${leverage}x.`,
-      );
-    }
+    const leverage = resolveLeverageSetting(leverageSetting, assetInfo);
 
     await this.exchangeClient.updateLeverage({
       asset: assetInfo.assetId,
@@ -182,6 +192,7 @@ export class HyperliquidExchangeGateway {
     });
 
     this.leverageConfiguredSymbols.add(normalizedSymbol);
+    return leverage;
   }
 
   async fetchAccountSnapshot(accountAddress: `0x${string}`): Promise<HyperliquidAccountSnapshot> {

@@ -8,11 +8,12 @@ import type {
 import { buildRangeEntryOrders, buildRangeExitOrders } from "./ladderUtils.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const ACCOUNT_RISK_PCT = 0.05;
 
-export class ManualRangeTradingV1Strategy implements TradingStrategy {
-  readonly id = "manual-range-trading-v1";
+export class ManualRangeTradingV2Strategy implements TradingStrategy {
+  readonly id = "manual-range-trading-v2";
   readonly description =
-    "Recreates the original manual range strategy: close-based deviation and reclaim, equal ladder entries near the edge, and equal ladder exits across the range.";
+    "Recreates the original manual range strategy but sizes each ladder from stop-defined risk so a full stop-out loses 5% of account equity.";
 
   evaluate(context: StrategyContext): StrategyResult {
     if (!context.manualRange) {
@@ -32,7 +33,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
     if (context.hasOpenPosition) {
       return {
         notes: [
-          `${context.symbol}: skipped ${this.id} because a position or ladder plan is already active; v1 only re-arms after the current net position is fully flat.`,
+          `${context.symbol}: skipped ${this.id} because a position or ladder plan is already active; v2 only re-arms after the current net position is fully flat.`,
         ],
       };
     }
@@ -62,6 +63,14 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
     }
 
     const entryBandWidth = range.width * context.config.ladderEntryBandPct;
+    const riskBudgetUsd = context.currentEquityUsd * ACCOUNT_RISK_PCT;
+    if (riskBudgetUsd <= 0) {
+      return {
+        notes: [
+          `${context.symbol}: skipped ${this.id} because current equity ${context.currentEquityUsd.toFixed(2)} USD does not allow a positive 5% risk budget.`,
+        ],
+      };
+    }
 
     if (reclaimEvent.side === "long") {
       const upperEntry = Math.min(signalCandle.close, range.low + entryBandWidth);
@@ -70,7 +79,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: manual v1 long reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: manual v2 long reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with a ${riskBudgetUsd.toFixed(2)} USD stop-risk budget.`,
         ],
         signal: {
           strategyId: this.id,
@@ -87,7 +96,11 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
             "Original manual range logic: a 4h close deviated below the range and a later closed 4h candle reclaimed back inside it.",
           generatedAt: signalCandle.closeTime,
           expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
-          positionSizeUsd: context.config.paperPositionSizeUsd,
+          maxRiskUsd: riskBudgetUsd,
+          metadata: {
+            riskBudgetUsd: Number(riskBudgetUsd.toFixed(2)),
+            riskPctOfEquity: ACCOUNT_RISK_PCT,
+          },
         },
       };
     }
@@ -98,7 +111,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
 
     return {
       notes: [
-        `${context.symbol}: manual v1 short reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+        `${context.symbol}: manual v2 short reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with a ${riskBudgetUsd.toFixed(2)} USD stop-risk budget.`,
       ],
       signal: {
         strategyId: this.id,
@@ -115,7 +128,11 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
           "Original manual range logic: a 4h close deviated above the range and a later closed 4h candle reclaimed back inside it.",
         generatedAt: signalCandle.closeTime,
         expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
-        positionSizeUsd: context.config.paperPositionSizeUsd,
+        maxRiskUsd: riskBudgetUsd,
+        metadata: {
+          riskBudgetUsd: Number(riskBudgetUsd.toFixed(2)),
+          riskPctOfEquity: ACCOUNT_RISK_PCT,
+        },
       },
     };
   }
