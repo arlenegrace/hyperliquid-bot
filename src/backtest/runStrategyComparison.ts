@@ -15,6 +15,7 @@ import {
   syncManualRangeState,
 } from "../manualRanges.js";
 import type {
+  BrokerPosition,
   Candle,
   ManualRangeState,
   PaperBrokerSnapshot,
@@ -40,7 +41,7 @@ interface StrategyComparisonRow {
 
 interface StrategyBacktestResult {
   summary: StrategyComparisonRow;
-  signalDetections: Record<string, string[]>;
+  filledTradeDetections: Record<string, string[]>;
 }
 
 function formatNumber(value: number): string {
@@ -60,6 +61,52 @@ function ansiColorForDetectionLine(line: string): string {
 
 function buildMarkPriceMap(markPrices: Map<string, number>): Record<string, number> {
   return Object.fromEntries(markPrices.entries());
+}
+
+function getFirstEntryFillTime(position: BrokerPosition): number | undefined {
+  const fillTimes = position.entryOrders
+    .map((order) => order.filledAt)
+    .filter((filledAt): filledAt is number => typeof filledAt === "number");
+
+  if (fillTimes.length === 0) {
+    return undefined;
+  }
+
+  return Math.min(...fillTimes);
+}
+
+function collectFilledTradeDetections(
+  snapshot: PaperBrokerSnapshot,
+  strategyId: string,
+  symbol: string,
+  filledTradeDetections: Record<string, string[]>,
+  loggedFilledPositionIds: Set<string>,
+): void {
+  const candidatePositions = [
+    ...snapshot.openPositions,
+    ...snapshot.closedPositions,
+    ...snapshot.cancelledPositions,
+  ].filter((position) => position.symbol === symbol && position.strategyId === strategyId);
+
+  for (const position of candidatePositions) {
+    if (loggedFilledPositionIds.has(position.id)) {
+      continue;
+    }
+
+    const firstFillTime = getFirstEntryFillTime(position);
+    if (firstFillTime === undefined) {
+      continue;
+    }
+
+    loggedFilledPositionIds.add(position.id);
+    if (firstFillTime < RESEARCH_START_TIME || firstFillTime > RESEARCH_END_TIME) {
+      continue;
+    }
+
+    const setup = position.setupKind !== undefined ? ` (${position.setupKind})` : "";
+    const detectionLabel = `${formatConsoleTimestamp(firstFillTime)} ${position.side}${setup}`;
+    filledTradeDetections[symbol] = [...(filledTradeDetections[symbol] ?? []), detectionLabel];
+  }
 }
 
 async function fetchBacktestCandles(
@@ -94,7 +141,8 @@ async function runBacktest(
   const symbols = Object.keys(candlesBySymbol);
   const markPrices = new Map<string, number>();
   const manualRangeStates = new Map<string, ManualRangeState>();
-  const signalDetections: Record<string, string[]> = {};
+  const filledTradeDetections: Record<string, string[]> = {};
+  const loggedFilledPositionIds = new Set<string>();
   const timestamps = [
     ...new Set(
       symbols.flatMap((symbol) => (candlesBySymbol[symbol] ?? []).map((candle) => candle.closeTime)),
@@ -117,6 +165,13 @@ async function runBacktest(
       currentIndexes[symbol] = nextIndex;
       markPrices.set(symbol, nextCandle.close);
       await broker.processCandle(symbol, nextCandle);
+      collectFilledTradeDetections(
+        broker.snapshot(),
+        strategy.id,
+        symbol,
+        filledTradeDetections,
+        loggedFilledPositionIds,
+      );
       updatedSymbols.push(symbol);
     }
 
@@ -172,13 +227,13 @@ async function runBacktest(
 
       if (result.signal) {
         await broker.openPosition(result.signal);
-
-        if (result.signal.generatedAt >= RESEARCH_START_TIME && result.signal.generatedAt <= RESEARCH_END_TIME) {
-          const setup =
-            result.signal.setupKind !== undefined ? ` (${result.signal.setupKind})` : "";
-          const detectionLabel = `${formatConsoleTimestamp(result.signal.generatedAt)} ${result.signal.side}${setup}`;
-          signalDetections[symbol] = [...(signalDetections[symbol] ?? []), detectionLabel];
-        }
+        collectFilledTradeDetections(
+          broker.snapshot(),
+          strategy.id,
+          symbol,
+          filledTradeDetections,
+          loggedFilledPositionIds,
+        );
       }
     }
 
@@ -192,7 +247,7 @@ async function runBacktest(
   const snapshot = broker.snapshot();
   return {
     summary: summarizeSnapshot(strategy.id, snapshot),
-    signalDetections,
+    filledTradeDetections,
   };
 }
 
@@ -283,15 +338,15 @@ async function main(): Promise<void> {
   const manualRangeResult = results.find((result) => result.summary.strategyId === "manual-range-trading");
   if (manualRangeResult) {
     console.log(
-      `[backtest] Manual range detections during the ${formatConsoleSymbolList(symbols)} research window:`,
+      `[backtest] Manual range filled trades during the ${formatConsoleSymbolList(symbols)} research window:`,
     );
     for (const symbol of symbols) {
-      const detections = manualRangeResult.signalDetections[symbol] ?? [];
+      const detections = manualRangeResult.filledTradeDetections[symbol] ?? [];
       if (detections.length === 0) {
-        console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading detections: none`);
+        console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading filled trades: none`);
         continue;
       }
-      console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading detections:`);
+      console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading filled trades:`);
       for (const line of detections) {
         const color = ansiColorForDetectionLine(line);
         const reset = color ? DETECTION_COLOR_RESET : "";
