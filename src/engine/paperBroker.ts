@@ -1,12 +1,13 @@
 import type {
   Candle,
-  PaperBrokerSnapshot,
-  PaperPosition,
+  BrokerPosition,
+  BrokerSnapshot,
   PositionEntryOrder,
   PositionExitOrder,
   StrategySignal,
   TradeSide,
 } from "../types.js";
+import type { Broker } from "./broker.js";
 
 const POSITION_EPSILON = 1e-9;
 
@@ -38,11 +39,12 @@ function stopDistance(side: TradeSide, entryPrice: number, stopLoss: number): nu
   return stopLoss - entryPrice;
 }
 
-function clonePosition(position: PaperPosition): PaperPosition {
+function clonePosition(position: BrokerPosition): BrokerPosition {
   return {
     ...position,
     entryOrders: position.entryOrders.map((order) => ({ ...order })),
     exitOrders: position.exitOrders.map((order) => ({ ...order })),
+    ...(position.stopOrder ? { stopOrder: { ...position.stopOrder } } : {}),
     ...(position.metadata ? { metadata: { ...position.metadata } } : {}),
     ...(position.setupKind ? { setupKind: position.setupKind } : {}),
   };
@@ -53,10 +55,12 @@ interface PaperBrokerExecutionOptions {
   slippageRate?: number;
 }
 
-export class PaperBroker {
-  private readonly openPositions = new Map<string, PaperPosition>();
-  private readonly closedPositions: PaperPosition[] = [];
-  private readonly cancelledPositions: PaperPosition[] = [];
+export class PaperBroker implements Broker {
+  readonly mode = "paper" as const;
+
+  private readonly openPositions = new Map<string, BrokerPosition>();
+  private readonly closedPositions: BrokerPosition[] = [];
+  private readonly cancelledPositions: BrokerPosition[] = [];
   private readonly lastMarks = new Map<string, number>();
   private realizedPnlUsd = 0;
   private grossProfitUsd = 0;
@@ -76,17 +80,25 @@ export class PaperBroker {
     this.peakEquityUsd = startingBalanceUsd;
   }
 
+  async initialize(): Promise<string[]> {
+    return [];
+  }
+
+  async onCycleStart(): Promise<string[]> {
+    return [];
+  }
+
   hasOpenPosition(symbol: string, strategyId: string): boolean {
     return this.getOpenPositions(symbol, strategyId).length > 0;
   }
 
-  getOpenPositions(symbol: string, strategyId: string): PaperPosition[] {
+  getOpenPositions(symbol: string, strategyId: string): BrokerPosition[] {
     return [...this.openPositions.values()].filter(
       (position) => position.symbol === symbol && position.strategyId === strategyId,
     );
   }
 
-  openPosition(signal: StrategySignal): string[] {
+  async openPosition(signal: StrategySignal): Promise<string[]> {
     const entryOrders = this.buildEntryOrders(signal);
     const intendedSizeUnits = entryOrders.reduce((sum, order) => sum + order.sizeUnits, 0);
     if (intendedSizeUnits <= POSITION_EPSILON) {
@@ -103,7 +115,7 @@ export class PaperBroker {
       status: "pending",
     }));
     const positionId = `${signal.strategyId}-${signal.symbol}-${signal.generatedAt}-${this.nextPositionSequence++}`;
-    const position: PaperPosition = {
+    const position: BrokerPosition = {
       id: positionId,
       symbol: signal.symbol,
       strategyId: signal.strategyId,
@@ -149,7 +161,7 @@ export class PaperBroker {
     return logs;
   }
 
-  cancelPositionById(positionId: string, closedAt: number, reason: string, note?: string): string[] {
+  async cancelPositionById(positionId: string, closedAt: number, reason: string, note?: string): Promise<string[]> {
     const position = this.openPositions.get(positionId);
     if (!position) {
       return [];
@@ -162,7 +174,7 @@ export class PaperBroker {
     return this.cancelPosition(position, closedAt, reason, note);
   }
 
-  processCandle(symbol: string, candle: Candle): string[] {
+  async processCandle(symbol: string, candle: Candle): Promise<string[]> {
     this.lastMarks.set(symbol, candle.close);
 
     const logs: string[] = [];
@@ -228,7 +240,7 @@ export class PaperBroker {
     return logs;
   }
 
-  recordEquity(markPrices: Record<string, number>): void {
+  async recordEquity(markPrices: Record<string, number>): Promise<void> {
     for (const [symbol, price] of Object.entries(markPrices)) {
       this.lastMarks.set(symbol, price);
     }
@@ -243,8 +255,8 @@ export class PaperBroker {
     this.maxDrawdownPct = Math.max(this.maxDrawdownPct, drawdownPct);
   }
 
-  forceCloseAll(markPrices: Record<string, number>, closedAt: number, reason: string): string[] {
-    this.recordEquity(markPrices);
+  async forceCloseAll(markPrices: Record<string, number>, closedAt: number, reason: string): Promise<string[]> {
+    await this.recordEquity(markPrices);
 
     const logs: string[] = [];
     for (const position of [...this.openPositions.values()]) {
@@ -264,7 +276,7 @@ export class PaperBroker {
     return logs;
   }
 
-  snapshot(): PaperBrokerSnapshot {
+  snapshot(): BrokerSnapshot {
     const unrealizedPnlUsd = [...this.openPositions.values()].reduce((sum, position) => {
       if (position.status !== "open" || position.averageEntryPrice === undefined) {
         return sum;
@@ -322,7 +334,7 @@ export class PaperBroker {
     }));
   }
 
-  private getPendingEntryOrders(position: PaperPosition): PositionEntryOrder[] {
+  private getPendingEntryOrders(position: BrokerPosition): PositionEntryOrder[] {
     return [...position.entryOrders]
       .filter((order) => order.status === "pending")
       .sort((left, right) => {
@@ -334,7 +346,7 @@ export class PaperBroker {
       });
   }
 
-  private getPendingExitOrders(position: PaperPosition): PositionExitOrder[] {
+  private getPendingExitOrders(position: BrokerPosition): PositionExitOrder[] {
     return [...position.exitOrders]
       .filter((order) => order.status === "pending")
       .sort((left, right) => {
@@ -346,7 +358,7 @@ export class PaperBroker {
       });
   }
 
-  private fillEntryOrder(position: PaperPosition, order: PositionEntryOrder, filledAt: number): string[] {
+  private fillEntryOrder(position: BrokerPosition, order: PositionEntryOrder, filledAt: number): string[] {
     if (order.status !== "pending") {
       return [];
     }
@@ -358,6 +370,9 @@ export class PaperBroker {
 
     order.status = "filled";
     order.filledAt = filledAt;
+    order.filledSizeUnits = order.sizeUnits;
+    order.averageFillPrice = executedPrice;
+    order.feePaidUsd = feeUsd;
 
     const priorFilledSize = position.filledSizeUnits;
     const nextFilledSize = priorFilledSize + order.sizeUnits;
@@ -379,7 +394,7 @@ export class PaperBroker {
     return logs;
   }
 
-  private fillExitOrder(position: PaperPosition, order: PositionExitOrder, closedAt: number): string[] {
+  private fillExitOrder(position: BrokerPosition, order: PositionExitOrder, closedAt: number): string[] {
     if (order.status !== "pending" || position.averageEntryPrice === undefined) {
       return [];
     }
@@ -397,6 +412,9 @@ export class PaperBroker {
 
     order.status = "filled";
     order.hitAt = closedAt;
+    order.filledSizeUnits = sizeUnits;
+    order.averageFillPrice = executedPrice;
+    order.feePaidUsd = feeUsd;
     position.remainingSizeUnits -= sizeUnits;
     position.realizedPnlUsd += realizedPnlUsd;
     this.realizedPnlUsd += realizedPnlUsd;
@@ -408,7 +426,7 @@ export class PaperBroker {
   }
 
   private closeRemainingPosition(
-    position: PaperPosition,
+    position: BrokerPosition,
     exitPrice: number,
     closedAt: number,
     closeReason: string,
@@ -442,7 +460,7 @@ export class PaperBroker {
     return logs;
   }
 
-  private finishPosition(position: PaperPosition, closedAt: number, closeReason: string): string[] {
+  private finishPosition(position: BrokerPosition, closedAt: number, closeReason: string): string[] {
     position.status = "closed";
     position.closeReason = closeReason;
     position.closedAt = closedAt;
@@ -456,7 +474,7 @@ export class PaperBroker {
     ];
   }
 
-  private cancelPosition(position: PaperPosition, closedAt: number, closeReason: string, note?: string): string[] {
+  private cancelPosition(position: BrokerPosition, closedAt: number, closeReason: string, note?: string): string[] {
     position.status = "cancelled";
     position.closeReason = closeReason;
     position.closedAt = closedAt;
@@ -479,7 +497,7 @@ export class PaperBroker {
     return note ? [`${position.symbol}: ${closeReason}. ${note}`] : [`${position.symbol}: ${closeReason}.`];
   }
 
-  private clearOppositeExposureForFlip(position: PaperPosition, fillPrice: number, filledAt: number): string[] {
+  private clearOppositeExposureForFlip(position: BrokerPosition, fillPrice: number, filledAt: number): string[] {
     const logs: string[] = [];
     const oppositePositions = [...this.openPositions.values()].filter(
       (candidate) =>

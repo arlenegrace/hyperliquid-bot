@@ -34,6 +34,13 @@
       "rangeHigh": 669.14,
       "validFromTime": "2026-02-11T08:00:00.000Z",
       "notes": "BNB range: Feb 6 16:00 UTC high and Feb 11 8:00 UTC low."
+    },
+    {
+      "symbol": "XRP",
+      "rangeLow": 1.3421,
+      "rangeHigh": 1.5442,
+      "validFromTime": "2026-02-11T16:00:00.000Z",
+      "notes": "XRP range: Feb 6 12:00 UTC high and Feb 11 16:00 UTC low."
     }
   ]
 }

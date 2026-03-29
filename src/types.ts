@@ -3,6 +3,8 @@ export type TradeSide = "long" | "short";
 export type PivotType = "high" | "low";
 export type RangeSource = "pivot-cluster" | "manual";
 export type OrderStatus = "pending" | "filled" | "cancelled";
+export type ExecutionMode = "paper" | "live";
+export type MarginMode = "cross" | "isolated";
 export type ManualRangeSetupKind = "initial-reclaim" | "edge-reentry";
 export type StrategyEntryMode = "standard" | "flip";
 export type SignalMetadataValue = string | number | boolean | undefined;
@@ -110,6 +112,21 @@ export interface NetPositionSnapshot {
   sizeUnits: number;
 }
 
+export interface LiveTradingConfig {
+  enabled: boolean;
+  dryRun: boolean;
+  useTestnet: boolean;
+  accountAddress?: `0x${string}`;
+  privateKey?: `0x${string}`;
+  stateFile: string;
+  defaultLeverage: number;
+  marginMode: MarginMode;
+  maxNotionalUsd: number;
+  maxOpenPositions: number;
+  slippageBps: number;
+  orderTimeoutMs: number;
+}
+
 export interface StrategySignal {
   strategyId: string;
   symbol: string;
@@ -143,9 +160,11 @@ export interface BotConfig {
   interval: CandleInterval;
   watchlist: string[];
   pollIntervalMs: number;
+  executionMode: ExecutionMode;
   rangeLookbackCandles: number;
   paperStartingBalanceUsd: number;
   paperPositionSizeUsd: number;
+  live: LiveTradingConfig;
   stopBufferPct: number;
   pivotStrength: number;
   pivotClusterTolerancePct: number;
@@ -174,7 +193,7 @@ export interface StrategyContext {
   candles: Candle[];
   config: BotConfig;
   hasOpenPosition: boolean;
-  openPositions: PaperPosition[];
+  openPositions: BrokerPosition[];
   currentEquityUsd: number;
   manualRange?: ManualRangeDefinition;
   manualRangeState?: ManualRangeState;
@@ -194,6 +213,11 @@ export interface PositionEntryOrder {
   riskBudgetUsd?: number;
   sizeUnits: number;
   status: OrderStatus;
+  clientOrderId?: `0x${string}`;
+  exchangeOrderId?: number;
+  filledSizeUnits?: number;
+  averageFillPrice?: number;
+  feePaidUsd?: number;
   filledAt?: number;
 }
 
@@ -203,10 +227,27 @@ export interface PositionExitOrder {
   sizeFraction: number;
   sizeUnits: number;
   status: OrderStatus;
+  clientOrderId?: `0x${string}`;
+  exchangeOrderId?: number;
+  filledSizeUnits?: number;
+  averageFillPrice?: number;
+  feePaidUsd?: number;
   hitAt?: number;
 }
 
-export interface PaperPosition {
+export interface PositionStopOrder {
+  price: number;
+  sizeUnits: number;
+  status: OrderStatus;
+  clientOrderId?: `0x${string}`;
+  exchangeOrderId?: number;
+  filledSizeUnits?: number;
+  averageFillPrice?: number;
+  feePaidUsd?: number;
+  filledAt?: number;
+}
+
+export interface BrokerPosition {
   id: string;
   symbol: string;
   strategyId: string;
@@ -225,13 +266,16 @@ export interface PaperPosition {
   status: "pending" | "open" | "closed" | "cancelled";
   closeReason?: string;
   closedAt?: number;
+  stopOrder?: PositionStopOrder;
   setupKind?: ManualRangeSetupKind;
   entryMode?: StrategyEntryMode;
   netPositionBeforeEntry?: NetPositionSnapshot;
   metadata?: Record<string, SignalMetadataValue>;
 }
 
-export interface PaperBrokerSnapshot {
+export type PaperPosition = BrokerPosition;
+
+export interface BrokerSnapshot {
   startingBalanceUsd: number;
   realizedPnlUsd: number;
   unrealizedPnlUsd: number;
@@ -242,7 +286,9 @@ export interface PaperBrokerSnapshot {
   totalFeesUsd: number;
   wins: number;
   losses: number;
-  openPositions: PaperPosition[];
-  closedPositions: PaperPosition[];
-  cancelledPositions: PaperPosition[];
+  openPositions: BrokerPosition[];
+  closedPositions: BrokerPosition[];
+  cancelledPositions: BrokerPosition[];
 }
+
+export type PaperBrokerSnapshot = BrokerSnapshot;

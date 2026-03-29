@@ -17,7 +17,7 @@ import {
   type ManualRangeMap,
   syncManualRangeState,
 } from "../manualRanges.js";
-import { PaperBroker } from "./paperBroker.js";
+import type { Broker } from "./broker.js";
 
 export class TradingBot {
   private readonly lastProcessedCloseTimeBySymbol = new Map<string, number>();
@@ -27,13 +27,16 @@ export class TradingBot {
   constructor(
     private readonly config: BotConfig,
     private readonly marketDataClient: HyperliquidClient,
-    private readonly paperBroker: PaperBroker,
+    private readonly broker: Broker,
     private readonly strategies: TradingStrategy[],
   ) {}
 
   async runOnce(): Promise<void> {
     await this.ensureManualRangeStatesLoaded();
     const manualRanges = await loadManualRanges(this.config.manualRangeFile);
+    for (const logLine of await this.broker.onCycleStart()) {
+      console.log(`[broker] ${logLine}`);
+    }
 
     console.log(`[bot] Starting scan for ${formatConsoleSymbolList(this.config.watchlist)} on ${this.config.interval} candles.`);
     console.log(`[bot] Loaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`);
@@ -42,7 +45,7 @@ export class TradingBot {
       await this.processSymbol(symbol, manualRanges);
     }
 
-    const snapshot = this.paperBroker.snapshot();
+    const snapshot = this.broker.snapshot();
     console.log(
       `[bot] Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, realized PnL: ${snapshot.realizedPnlUsd.toFixed(2)} USD.`,
     );
@@ -73,7 +76,7 @@ export class TradingBot {
         `${formatConsoleLabel(symbol)} Loaded ${candles.length} closed candles. Latest close ${latestClosedCandle.close.toFixed(2)} at ${formatConsoleTimestamp(latestClosedCandle.closeTime)}.`,
       );
 
-      for (const logLine of this.paperBroker.processCandle(symbol, latestClosedCandle)) {
+      for (const logLine of await this.broker.processCandle(symbol, latestClosedCandle)) {
         console.log(`${formatConsoleLabel(symbol)} ${normalizeConsoleMessage(symbol, logLine)}`);
       }
 
@@ -102,8 +105,8 @@ export class TradingBot {
       }
 
       for (const strategy of this.strategies) {
-        const snapshot = this.paperBroker.snapshot();
-        const openPositions = this.paperBroker.getOpenPositions(symbol, strategy.id);
+        const snapshot = this.broker.snapshot();
+        const openPositions = this.broker.getOpenPositions(symbol, strategy.id);
         const strategyContext = {
           symbol,
           candles,
@@ -121,7 +124,7 @@ export class TradingBot {
         }
 
         for (const cancellation of result.positionCancellations ?? []) {
-          for (const logLine of this.paperBroker.cancelPositionById(
+          for (const logLine of await this.broker.cancelPositionById(
             cancellation.positionId,
             latestClosedCandle.closeTime,
             cancellation.reason,
@@ -135,12 +138,12 @@ export class TradingBot {
           continue;
         }
 
-        for (const logLine of this.paperBroker.openPosition(result.signal)) {
+        for (const logLine of await this.broker.openPosition(result.signal)) {
           console.log(`${formatConsoleLabel(symbol)} ${normalizeConsoleMessage(symbol, logLine)}`);
         }
       }
 
-      this.paperBroker.recordEquity({ [symbol]: latestClosedCandle.close });
+      await this.broker.recordEquity({ [symbol]: latestClosedCandle.close });
       this.lastProcessedCloseTimeBySymbol.set(symbol, latestClosedCandle.closeTime);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

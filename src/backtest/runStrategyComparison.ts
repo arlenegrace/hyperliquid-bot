@@ -65,7 +65,7 @@ async function fetchBacktestCandles(
   return candlesBySymbol;
 }
 
-function runBacktest(
+async function runBacktest(
   strategy: TradingStrategy,
   candlesBySymbol: Record<string, Candle[]>,
   manualRanges: ManualRangeMap,
@@ -73,12 +73,13 @@ function runBacktest(
   positionSizeUsd: number,
   feeRate: number,
   slippageRate: number,
-): StrategyBacktestResult {
+): Promise<StrategyBacktestResult> {
   const config = loadConfig();
   const broker = new PaperBroker(startingBalanceUsd, positionSizeUsd, {
     feeRate,
     slippageRate,
   });
+  await broker.initialize();
   const symbols = Object.keys(candlesBySymbol);
   const markPrices = new Map<string, number>();
   const manualRangeStates = new Map<string, ManualRangeState>();
@@ -104,7 +105,7 @@ function runBacktest(
 
       currentIndexes[symbol] = nextIndex;
       markPrices.set(symbol, nextCandle.close);
-      broker.processCandle(symbol, nextCandle);
+      await broker.processCandle(symbol, nextCandle);
       updatedSymbols.push(symbol);
     }
 
@@ -145,11 +146,16 @@ function runBacktest(
       const result = strategy.evaluate(strategyContext);
 
       for (const cancellation of result.positionCancellations ?? []) {
-        broker.cancelPositionById(cancellation.positionId, latestCandle?.closeTime ?? timestamp, cancellation.reason, cancellation.note);
+        await broker.cancelPositionById(
+          cancellation.positionId,
+          latestCandle?.closeTime ?? timestamp,
+          cancellation.reason,
+          cancellation.note,
+        );
       }
 
       if (result.signal) {
-        broker.openPosition(result.signal);
+        await broker.openPosition(result.signal);
 
         if (result.signal.generatedAt >= RESEARCH_START_TIME && result.signal.generatedAt <= RESEARCH_END_TIME) {
           const detectionLabel = `${formatConsoleTimestamp(result.signal.generatedAt)} ${result.signal.side}`;
@@ -158,12 +164,12 @@ function runBacktest(
       }
     }
 
-    broker.recordEquity(buildMarkPriceMap(markPrices));
+    await broker.recordEquity(buildMarkPriceMap(markPrices));
   }
 
   const lastTimestamp = timestamps.at(-1) ?? Date.now();
-  broker.forceCloseAll(buildMarkPriceMap(markPrices), lastTimestamp, "backtest window completed");
-  broker.recordEquity(buildMarkPriceMap(markPrices));
+  await broker.forceCloseAll(buildMarkPriceMap(markPrices), lastTimestamp, "backtest window completed");
+  await broker.recordEquity(buildMarkPriceMap(markPrices));
 
   const snapshot = broker.snapshot();
   return {
@@ -224,8 +230,9 @@ async function main(): Promise<void> {
   );
   const candlesBySymbol = await fetchBacktestCandles(client, symbols, config.backtestLookbackCandles);
   const strategies = createAllStrategies();
-  const results = strategies.map((strategy) =>
-    runBacktest(
+  const results = await Promise.all(
+    strategies.map((strategy) =>
+      runBacktest(
       strategy,
       candlesBySymbol,
       manualRanges,
@@ -233,6 +240,7 @@ async function main(): Promise<void> {
       config.paperPositionSizeUsd,
       config.backtestTradingFeeRate,
       config.backtestSlippageRate,
+      ),
     ),
   );
   const rankedResults = rankResults(results.map((result) => result.summary));

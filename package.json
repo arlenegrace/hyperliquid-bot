@@ -1,14 +1,15 @@
 {
   "name": "hl-bot",
   "version": "1.0.0",
-  "description": "Simple modular Hyperliquid paper trading bot in TypeScript.",
+  "description": "Modular Hyperliquid range bot with paper and guarded live trading modes.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "backtest:compare": "tsx src/backtest/runStrategyComparison.ts",
     "check": "tsx src/index.ts --once",
     "dev": "tsx src/index.ts",
     "research:range": "tsx src/analysis/rangeResearch.ts",
-    "start": "node dist/src/index.js"
+    "start": "node dist/src/index.js",
+    "test": "node --test --import tsx src/config.test.ts src/engine/createBroker.test.ts src/engine/liveGuardrails.test.ts src/engine/paperBroker.test.ts"
   },
   "keywords": [
     "hyperliquid",
@@ -18,7 +19,9 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@nktkas/hyperliquid": "^0.32.2",
     "dotenv": "^17.3.1",
+    "viem": "^2.47.6",
     "zod": "^4.3.6"
   },
   "devDependencies": {

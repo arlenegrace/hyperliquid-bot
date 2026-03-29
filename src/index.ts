@@ -2,7 +2,7 @@ import { loadConfig } from "./config.js";
 import { HyperliquidClient } from "./clients/hyperliquid.js";
 import { formatConsoleSymbol, formatConsoleSymbolList } from "./consoleFormat.js";
 import { TradingBot } from "./engine/bot.js";
-import { PaperBroker } from "./engine/paperBroker.js";
+import { createBroker } from "./engine/createBroker.js";
 import {
   getManualRangeForSymbol,
   loadManualRanges,
@@ -25,11 +25,17 @@ async function main(): Promise<void> {
   const marketDataClient = new HyperliquidClient(config.apiBaseUrl);
   const manualRanges = await loadManualRanges(config.manualRangeFile);
   const persistedStates = await loadManualRangeStates(config.manualRangeStateFile);
-  const paperBroker = new PaperBroker(config.paperStartingBalanceUsd, config.paperPositionSizeUsd);
+  const broker = createBroker(config);
   const strategies = createStrategies();
-  const bot = new TradingBot(config, marketDataClient, paperBroker, strategies);
+  const bot = new TradingBot(config, marketDataClient, broker, strategies);
+  const brokerLogs = await broker.initialize();
 
-  console.log(`[boot] Hyperliquid paper bot started in ${runOnceMode ? "single-run" : "interval"} mode.`);
+  console.log(
+    `[boot] Hyperliquid ${config.executionMode} bot started in ${runOnceMode ? "single-run" : "interval"} mode.`,
+  );
+  for (const logLine of brokerLogs) {
+    console.log(`[boot] ${logLine}`);
+  }
   console.log(
     `[boot] Watchlist ${formatConsoleSymbolList(config.watchlist)} | interval ${config.interval} | lookback ${config.rangeLookbackCandles} candles.`,
   );

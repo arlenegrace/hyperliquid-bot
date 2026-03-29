@@ -11,9 +11,22 @@ function createConfig(): BotConfig {
     interval: "4h",
     watchlist: ["BTC"],
     pollIntervalMs: 60_000,
+    executionMode: "paper",
     rangeLookbackCandles: 500,
     paperStartingBalanceUsd: 2_000,
     paperPositionSizeUsd: 100,
+    live: {
+      enabled: false,
+      dryRun: true,
+      useTestnet: false,
+      stateFile: ".live-broker-state.json",
+      defaultLeverage: 3,
+      marginMode: "cross",
+      maxNotionalUsd: 1_000,
+      maxOpenPositions: 3,
+      slippageBps: 10,
+      orderTimeoutMs: 10_000,
+    },
     stopBufferPct: 0.001,
     pivotStrength: 3,
     pivotClusterTolerancePct: 0.012,
@@ -178,10 +191,11 @@ test("manual range reversal keeps full flip risk budget and two-step exits", () 
   assert.equal(result.signal.exitOrders[1]?.sizeFraction, 0.5);
 });
 
-test("paper broker closes a long before opening a flip short", () => {
+test("paper broker closes a long before opening a flip short", async () => {
   const broker = new PaperBroker(2_000, 100);
+  await broker.initialize();
 
-  broker.openPosition(
+  await broker.openPosition(
     createSignal({
       side: "long",
       entryReferencePrice: 100,
@@ -195,7 +209,7 @@ test("paper broker closes a long before opening a flip short", () => {
     }),
   );
 
-  broker.processCandle(
+  await broker.processCandle(
     "BTC",
     createCandle({
       openTime: 3,
@@ -207,7 +221,7 @@ test("paper broker closes a long before opening a flip short", () => {
     }),
   );
 
-  broker.openPosition(
+  await broker.openPosition(
     createSignal({
       side: "short",
       entryReferencePrice: 118,
@@ -228,10 +242,11 @@ test("paper broker closes a long before opening a flip short", () => {
   assert.equal(snapshot.closedPositions[0]?.side, "long");
 });
 
-test("paper broker closes a short before opening a flip long", () => {
+test("paper broker closes a short before opening a flip long", async () => {
   const broker = new PaperBroker(2_000, 100);
+  await broker.initialize();
 
-  broker.openPosition(
+  await broker.openPosition(
     createSignal({
       side: "short",
       entryReferencePrice: 120,
@@ -245,7 +260,7 @@ test("paper broker closes a short before opening a flip long", () => {
     }),
   );
 
-  broker.processCandle(
+  await broker.processCandle(
     "BTC",
     createCandle({
       openTime: 3,
@@ -257,7 +272,7 @@ test("paper broker closes a short before opening a flip long", () => {
     }),
   );
 
-  broker.openPosition(
+  await broker.openPosition(
     createSignal({
       side: "long",
       entryReferencePrice: 102,
