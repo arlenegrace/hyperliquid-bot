@@ -14,7 +14,7 @@ import type {
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const RESEARCH_START_TIME = Date.UTC(2026, 0, 15, 0, 0, 0, 0);
-const RESEARCH_END_TIME = Date.UTC(2026, 2, 10, 23, 59, 59, 999);
+const RESEARCH_END_TIME = Date.UTC(2027, 2, 28, 23, 59, 59, 999);
 
 interface ResearchTimestamp {
   label: string;

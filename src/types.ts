@@ -183,6 +183,8 @@ export interface BotConfig {
   backtestLookbackCandles: number;
   manualRangeFile: string;
   manualRangeStateFile: string;
+  /** Extension beyond range low/high as a fraction of range width (e.g. 0.5 = half-width buffer). */
+  manualRangeInvalidationExtendPct: number;
   manualRangeMaxRiskPct: number;
   backtestTradingFeeRate: number;
   backtestSlippageRate: number;

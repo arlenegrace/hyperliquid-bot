@@ -45,6 +45,7 @@ function createConfig(): BotConfig {
     backtestLookbackCandles: 900,
     manualRangeFile: "manual-ranges.json",
     manualRangeStateFile: "manual-range-state.json",
+    manualRangeInvalidationExtendPct: 0.5,
     manualRangeMaxRiskPct: 0.05,
     backtestTradingFeeRate: 0,
     backtestSlippageRate: 0,

@@ -88,7 +88,12 @@ export class TradingBot {
       }
 
       if (manualRange && manualRangeState && latestClosedCandle.closeTime >= (manualRange.validFromTime ?? 0)) {
-        const invalidationResult = applyManualRangeInvalidation(manualRangeState, manualRange, latestClosedCandle);
+        const invalidationResult = applyManualRangeInvalidation(
+          manualRangeState,
+          manualRange,
+          latestClosedCandle,
+          this.config.manualRangeInvalidationExtendPct,
+        );
         manualRangeState = invalidationResult.state;
         this.manualRangeStates.set(symbol, manualRangeState);
 

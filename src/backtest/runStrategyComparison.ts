@@ -24,7 +24,7 @@ import { buildRangeResearchReport } from "../analysis/rangeResearch.js";
 import { createAllStrategies } from "../../strategies/index.js";
 
 const RESEARCH_START_TIME = Date.UTC(2026, 0, 15, 0, 0, 0, 0);
-const RESEARCH_END_TIME = Date.UTC(2026, 2, 10, 23, 59, 59, 999);
+const RESEARCH_END_TIME = Date.UTC(2027, 2, 28, 23, 59, 59, 999);
 
 interface StrategyComparisonRow {
   strategyId: string;
@@ -45,6 +45,17 @@ interface StrategyBacktestResult {
 
 function formatNumber(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : "Infinity";
+}
+
+/** ANSI truecolor for manual-range detection lines (#4caf50 long, #f23645 short). */
+const DETECTION_LONG_COLOR = "\x1b[38;2;76;175;80m";
+const DETECTION_SHORT_COLOR = "\x1b[38;2;242;54;69m";
+const DETECTION_COLOR_RESET = "\x1b[0m";
+
+function ansiColorForDetectionLine(line: string): string {
+  if (/\blong\b/.test(line)) return DETECTION_LONG_COLOR;
+  if (/\bshort\b/.test(line)) return DETECTION_SHORT_COLOR;
+  return "";
 }
 
 function buildMarkPriceMap(markPrices: Map<string, number>): Record<string, number> {
@@ -126,7 +137,12 @@ async function runBacktest(
       }
 
       if (manualRange && manualRangeState && latestCandle && latestCandle.closeTime >= (manualRange.validFromTime ?? 0)) {
-        const invalidationResult = applyManualRangeInvalidation(manualRangeState, manualRange, latestCandle);
+        const invalidationResult = applyManualRangeInvalidation(
+          manualRangeState,
+          manualRange,
+          latestCandle,
+          config.manualRangeInvalidationExtendPct,
+        );
         manualRangeState = invalidationResult.state;
         manualRangeStates.set(symbol, manualRangeState);
       } else if (!manualRange) {
@@ -158,7 +174,9 @@ async function runBacktest(
         await broker.openPosition(result.signal);
 
         if (result.signal.generatedAt >= RESEARCH_START_TIME && result.signal.generatedAt <= RESEARCH_END_TIME) {
-          const detectionLabel = `${formatConsoleTimestamp(result.signal.generatedAt)} ${result.signal.side}`;
+          const setup =
+            result.signal.setupKind !== undefined ? ` (${result.signal.setupKind})` : "";
+          const detectionLabel = `${formatConsoleTimestamp(result.signal.generatedAt)} ${result.signal.side}${setup}`;
           signalDetections[symbol] = [...(signalDetections[symbol] ?? []), detectionLabel];
         }
       }
@@ -229,6 +247,13 @@ async function main(): Promise<void> {
     `[backtest] Fetching ${config.backtestLookbackCandles} recent 4h candles for ${formatConsoleSymbolList(symbols)}.`,
   );
   const candlesBySymbol = await fetchBacktestCandles(client, symbols, config.backtestLookbackCandles);
+  const candleCounts = symbols
+    .map((symbol) => `${formatConsoleSymbol(symbol)} ${(candlesBySymbol[symbol] ?? []).length}`)
+    .join(", ");
+  console.log(`[backtest] Closed 4h candle counts per symbol (API snapshot, not read from disk): ${candleCounts}.`);
+  console.log(
+    `[backtest] Manual range state is simulated in-memory from those candles only; ${config.manualRangeStateFile} is not loaded.`,
+  );
   const strategies = createAllStrategies();
   const results = await Promise.all(
     strategies.map((strategy) =>
@@ -262,11 +287,16 @@ async function main(): Promise<void> {
     );
     for (const symbol of symbols) {
       const detections = manualRangeResult.signalDetections[symbol] ?? [];
-      console.log(
-        detections.length > 0
-          ? `[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading detections: ${detections.join(", ")}`
-          : `[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading detections: none`,
-      );
+      if (detections.length === 0) {
+        console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading detections: none`);
+        continue;
+      }
+      console.log(`[backtest] ${formatConsoleSymbol(symbol)} manual-range-trading detections:`);
+      for (const line of detections) {
+        const color = ansiColorForDetectionLine(line);
+        const reset = color ? DETECTION_COLOR_RESET : "";
+        console.log(`${color}   ${line}${reset}`);
+      }
     }
   }
 

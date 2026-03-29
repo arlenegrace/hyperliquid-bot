@@ -70,6 +70,7 @@ const envSchema = z.object({
   SIGNAL_EXPIRY_CANDLES: z.coerce.number().int().min(1).max(50).default(18),
   MANUAL_RANGE_FILE: z.string().default("manual-ranges.json"),
   MANUAL_RANGE_STATE_FILE: z.string().default(".manual-range-state.json"),
+  MANUAL_RANGE_INVALIDATION_EXTEND_PCT: z.coerce.number().min(0).max(5).default(0.5),
   BACKTEST_SYMBOLS: z
     .string()
     .default("BTC,ETH")
@@ -135,6 +136,7 @@ export function loadConfig(): BotConfig {
     signalExpiryCandles: env.SIGNAL_EXPIRY_CANDLES,
     manualRangeFile: env.MANUAL_RANGE_FILE,
     manualRangeStateFile: env.MANUAL_RANGE_STATE_FILE,
+    manualRangeInvalidationExtendPct: env.MANUAL_RANGE_INVALIDATION_EXTEND_PCT,
     backtestSymbols: env.BACKTEST_SYMBOLS,
     backtestLookbackCandles: env.BACKTEST_LOOKBACK_CANDLES,
     backtestTradingFeeRate: env.BACKTEST_TRADING_FEE_RATE,

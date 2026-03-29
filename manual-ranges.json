@@ -37,8 +37,8 @@
     },
     {
       "symbol": "XRP",
-      "rangeLow": 1.3421,
-      "rangeHigh": 1.5442,
+      "rangeLow": 1.3413,
+      "rangeHigh": 1.5412,
       "validFromTime": "2026-02-11T16:00:00.000Z",
       "notes": "XRP range: Feb 6 12:00 UTC high and Feb 11 16:00 UTC low."
     }

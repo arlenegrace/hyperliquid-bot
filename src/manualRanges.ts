@@ -170,12 +170,15 @@ export function buildManualRangeSnapshot(
   };
 }
 
-export function getManualRangeInvalidationBounds(range: ManualRangeDefinition): {
+export function getManualRangeInvalidationBounds(
+  range: ManualRangeDefinition,
+  extensionPctOfWidth: number,
+): {
   lowerInvalidationPrice: number;
   upperInvalidationPrice: number;
 } {
   const width = range.rangeHigh - range.rangeLow;
-  const extension = width * 0.5;
+  const extension = width * extensionPctOfWidth;
 
   return {
     lowerInvalidationPrice: range.rangeLow - extension,
@@ -282,12 +285,13 @@ export function applyManualRangeInvalidation(
   state: ManualRangeState,
   range: ManualRangeDefinition,
   candle: Candle,
+  extensionPctOfWidth: number,
 ): { state: ManualRangeState; invalidatedNow: boolean } {
   if (state.isInvalidated) {
     return { state, invalidatedNow: false };
   }
 
-  const { lowerInvalidationPrice, upperInvalidationPrice } = getManualRangeInvalidationBounds(range);
+  const { lowerInvalidationPrice, upperInvalidationPrice } = getManualRangeInvalidationBounds(range, extensionPctOfWidth);
 
   if (candle.close > upperInvalidationPrice) {
     return {
