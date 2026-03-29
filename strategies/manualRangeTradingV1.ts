@@ -1,4 +1,5 @@
 import { findLatestReclaimEvent } from "../src/analysis/rangeResearch.js";
+import { wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import type {
   StrategyContext,
@@ -56,7 +57,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
     if (!reclaimEvent) {
       return {
         notes: [
-          `${context.symbol}: manual range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim setup exists on the newest closed candle for ${this.id}.`,
+          `${context.symbol}: manual range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim setup exists on the newest closed candle for ${wrapOrange(this.id)}.`,
         ],
       };
     }

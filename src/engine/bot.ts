@@ -2,8 +2,9 @@ import { HyperliquidClient } from "../clients/hyperliquid.js";
 import {
   formatConsoleLabel,
   formatConsoleSymbol,
-  formatConsoleSymbolList,
+  formatConsoleSymbolListGreen,
   formatConsoleTimestamp,
+  formatRealizedPnlUsdColored,
   normalizeConsoleMessage,
 } from "../consoleFormat.js";
 import type { BotConfig, TradingStrategy } from "../types.js";
@@ -38,7 +39,7 @@ export class TradingBot {
       console.log(`[broker] ${logLine}`);
     }
 
-    console.log(`[bot] Starting scan for ${formatConsoleSymbolList(this.config.watchlist)} on ${this.config.interval} candles.`);
+    console.log(`[bot] Starting scan for ${formatConsoleSymbolListGreen(this.config.watchlist)} on ${this.config.interval} candles.`);
     console.log(`[bot] Loaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`);
 
     for (const symbol of this.config.watchlist) {
@@ -47,7 +48,7 @@ export class TradingBot {
 
     const snapshot = this.broker.snapshot();
     console.log(
-      `[bot] Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, realized PnL: ${snapshot.realizedPnlUsd.toFixed(2)} USD.`,
+      `[bot] Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, realized PnL: ${formatRealizedPnlUsdColored(snapshot.realizedPnlUsd)}.`,
     );
     await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
   }

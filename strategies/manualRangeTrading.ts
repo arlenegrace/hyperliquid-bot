@@ -1,3 +1,4 @@
+import { wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import { calculateSignalRiskBudgetUsd, getNetPositionSnapshot, isFlipSignal, sumPositionStopRiskUsd } from "../src/risk.js";
 import type {
@@ -589,7 +590,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
     }
 
     notes.push(
-      `${context.symbol}: manual range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim or edge re-entry setup exists on the newest closed candle.`,
+      `${context.symbol}: manual range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim or edge re-entry setup exists on the newest closed candle for ${wrapOrange(this.id)}.`,
     );
 
     return {

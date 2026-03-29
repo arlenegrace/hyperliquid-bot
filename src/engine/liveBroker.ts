@@ -14,6 +14,7 @@ import type {
   StrategySignal,
   TradeSide,
 } from "../types.js";
+import { wrapOrange } from "../consoleFormat.js";
 import type { Broker } from "./broker.js";
 import { buildPlannedEntryOrders, calculatePlannedEntryNotionalUsd } from "./liveGuardrails.js";
 
@@ -163,7 +164,7 @@ export class HyperliquidLiveBroker implements Broker {
     await this.saveState();
 
     return [
-      `live broker initialized for ${this.accountAddress} using ${this.config.live.marginMode} margin.`,
+      `live broker initialized for ${wrapOrange(this.accountAddress)} using ${this.config.live.marginMode} margin.`,
       ...leverageLogs,
       this.config.live.dryRun
         ? "dry-run mode is active; exchange writes are disabled."

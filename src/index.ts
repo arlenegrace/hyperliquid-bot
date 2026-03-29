@@ -1,6 +1,13 @@
 import { loadConfig } from "./config.js";
 import { HyperliquidClient } from "./clients/hyperliquid.js";
-import { formatConsoleSymbol, formatConsoleSymbolList } from "./consoleFormat.js";
+import {
+  ANSI_GREEN,
+  ANSI_RED,
+  ANSI_RESET,
+  formatConsoleSymbol,
+  formatConsoleSymbolList,
+  wrapOrange,
+} from "./consoleFormat.js";
 import { TradingBot } from "./engine/bot.js";
 import { createBroker } from "./engine/createBroker.js";
 import {
@@ -10,10 +17,6 @@ import {
   syncManualRangeState,
 } from "./manualRanges.js";
 import { createStrategies } from "../strategies/index.js";
-
-const ANSI_RESET = "\u001b[0m";
-const ANSI_GREEN = "\u001b[32m";
-const ANSI_RED = "\u001b[31m";
 
 function colorize(symbol: string, color: string): string {
   return `${color}${formatConsoleSymbol(symbol)}${ANSI_RESET}`;
@@ -39,7 +42,9 @@ async function main(): Promise<void> {
   console.log(
     `[boot] Watchlist ${formatConsoleSymbolList(config.watchlist)} | interval ${config.interval} | lookback ${config.rangeLookbackCandles} candles.`,
   );
-  console.log(`[boot] Active strategy: ${strategies.map((strategy) => strategy.id).join(", ")}.`);
+  console.log(
+    `[boot] Active strategy: ${wrapOrange(strategies.map((strategy) => strategy.id).join(", "))}.`,
+  );
 
   const rangeStatuses = config.watchlist.map((symbol) => {
     const manualRange = getManualRangeForSymbol(manualRanges, symbol);

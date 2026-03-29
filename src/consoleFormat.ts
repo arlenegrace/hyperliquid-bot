@@ -1,13 +1,36 @@
+export const ANSI_RESET = "\u001b[0m";
+export const ANSI_GREEN = "\u001b[32m";
+export const ANSI_RED = "\u001b[31m";
+/** Truecolor for #ff9800 */
+export const ANSI_ORANGE = "\u001b[38;2;255;152;0m";
+
+export function wrapOrange(text: string): string {
+  return `${ANSI_ORANGE}${text}${ANSI_RESET}`;
+}
+
+/** Green for zero or profit, red for losses. */
+export function formatRealizedPnlUsdColored(usd: number): string {
+  const text = `${usd.toFixed(2)} USD`;
+  if (usd < 0) {
+    return `${ANSI_RED}${text}${ANSI_RESET}`;
+  }
+  return `${ANSI_GREEN}${text}${ANSI_RESET}`;
+}
+
 export function formatConsoleSymbol(symbol: string): string {
   return `$${symbol.toUpperCase()}`;
 }
 
 export function formatConsoleLabel(symbol: string): string {
-  return `[${formatConsoleSymbol(symbol)}]`;
+  return `[${ANSI_GREEN}${formatConsoleSymbol(symbol)}${ANSI_RESET}]`;
 }
 
 export function formatConsoleSymbolList(symbols: string[]): string {
   return symbols.map(formatConsoleSymbol).join(", ");
+}
+
+export function formatConsoleSymbolListGreen(symbols: string[]): string {
+  return symbols.map((s) => `${ANSI_GREEN}${formatConsoleSymbol(s)}${ANSI_RESET}`).join(", ");
 }
 
 export function formatConsoleTimestamp(timestamp: number): string {
