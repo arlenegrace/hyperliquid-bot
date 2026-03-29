@@ -85,6 +85,7 @@ test("loadConfig accepts max leverage and keeps cross margin by default", () => 
   withEnv(
     {
       EXECUTION_MODE: "live",
+      ACTIVE_STRATEGY: "manual-range-trading-v2",
       HL_PRIVATE_KEY: LIVE_PRIVATE_KEY,
       HL_ACCOUNT_ADDRESS: LIVE_ACCOUNT_ADDRESS,
       LIVE_DEFAULT_LEVERAGE: "max",

@@ -91,6 +91,21 @@ const envSchema = z.object({
         .filter(Boolean),
     )
     .pipe(z.array(z.string()).min(1, "BACKTEST_SYMBOLS must contain at least one symbol.")),
+  BACKTEST_TRADING_START: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined || value.trim() === "") {
+        return undefined;
+      }
+
+      const parsed = Date.parse(value);
+      if (Number.isNaN(parsed)) {
+        throw new Error("BACKTEST_TRADING_START must be a valid ISO 8601 datetime string.");
+      }
+
+      return parsed;
+    }),
   BACKTEST_LOOKBACK_CANDLES: z.coerce.number().int().min(200).max(5_000).default(900),
   BACKTEST_TRADING_FEE_RATE: z.coerce.number().min(0).max(0.01).default(0.00045),
   BACKTEST_SLIPPAGE_RATE: z.coerce.number().min(0).max(0.01).default(0.001),
@@ -150,6 +165,7 @@ export function loadConfig(): BotConfig {
     manualRangeInvalidationExtendPct: env.MANUAL_RANGE_INVALIDATION_EXTEND_PCT,
     manualRangeMaxStopExtensionPct: env.MANUAL_RANGE_MAX_STOP_EXTENSION_PCT,
     backtestSymbols: env.BACKTEST_SYMBOLS,
+    backtestTradingStartTimeMs: env.BACKTEST_TRADING_START ?? Date.UTC(2026, 1, 21, 0, 0, 0, 0),
     backtestLookbackCandles: env.BACKTEST_LOOKBACK_CANDLES,
     backtestTradingFeeRate: env.BACKTEST_TRADING_FEE_RATE,
     backtestSlippageRate: env.BACKTEST_SLIPPAGE_RATE,

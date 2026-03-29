@@ -2,45 +2,45 @@
   "ranges": [
     {
       "symbol": "BTC",
-      "rangeLow": 65100,
-      "rangeHigh": 72200,
-      "validFromTime": "2026-02-12T20:00:00.000Z",
-      "notes": "Based on Feb 8 high and Feb 12 low."
+      "rangeLow": 80255,
+      "rangeHigh": 93089,
+      "validFromTime": "2025-11-28T12:00:00.000Z",
+      "notes": "Low $80,255 Nov 21 2025 04:00 UTC; high $93,089 Nov 28 2025 12:00 UTC."
     },
     {
       "symbol": "ETH",
-      "rangeLow": 1896.7,
-      "rangeHigh": 2149.7,
-      "validFromTime": "2026-02-12T20:00:00.000Z",
-      "notes": "Based on Feb 8 high and Feb 12 low."
+      "rangeLow": 2621.4,
+      "rangeHigh": 3096.9,
+      "validFromTime": "2025-11-28T12:00:00.000Z",
+      "notes": "Low $2,621.4 Nov 21 2025 12:00 UTC; high $3,096.9 Nov 28 2025 12:00 UTC."
     },
     {
       "symbol": "SOL",
-      "rangeLow": 76.55,
-      "rangeHigh": 89.709,
-      "validFromTime": "2026-02-12T12:00:00.000Z",
-      "notes": "SOL range based on the Feb 6 high and Feb 12 low."
+      "rangeLow": 120.07,
+      "rangeHigh": 144.6,
+      "validFromTime": "2025-11-26T16:00:00.000Z",
+      "notes": "Low $120.07 Nov 21 2025 04:00 UTC; high $144.60 Nov 26 2025 16:00 UTC."
     },
     {
       "symbol": "CRV",
-      "rangeLow": 0.22479,
-      "rangeHigh": 0.264,
-      "validFromTime": "2026-02-11T12:00:00.000Z",
-      "notes": "CRV range: Feb 6 16:00 UTC high and Feb 11 12:00 UTC low."
+      "rangeLow": 0.35808,
+      "rangeHigh": 0.44946,
+      "validFromTime": "2025-11-28T08:00:00.000Z",
+      "notes": "Low $0.35808 Nov 22 2025 12:00 UTC; high $0.44946 Nov 28 2025 08:00 UTC."
     },
     {
       "symbol": "BNB",
-      "rangeLow": 587.08,
-      "rangeHigh": 669.14,
-      "validFromTime": "2026-02-11T08:00:00.000Z",
-      "notes": "BNB range: Feb 6 16:00 UTC high and Feb 11 8:00 UTC low."
+      "rangeLow": 790.86,
+      "rangeHigh": 906.16,
+      "validFromTime": "2025-11-28T12:00:00.000Z",
+      "notes": "Low $790.86 Nov 21 2025 04:00 UTC; high $906.16 Nov 28 2025 12:00 UTC."
     },
     {
       "symbol": "XRP",
-      "rangeLow": 1.3413,
-      "rangeHigh": 1.5412,
-      "validFromTime": "2026-02-11T16:00:00.000Z",
-      "notes": "XRP range: Feb 6 12:00 UTC high and Feb 11 16:00 UTC low."
+      "rangeLow": 1.821,
+      "rangeHigh": 2.2861,
+      "validFromTime": "2025-11-24T20:00:00.000Z",
+      "notes": "Low $1.8210 Nov 21 2025 12:00 UTC; high $2.2861 Nov 24 2025 20:00 UTC."
     }
   ]
 }

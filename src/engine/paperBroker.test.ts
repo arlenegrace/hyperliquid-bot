@@ -44,6 +44,7 @@ function createConfig(): BotConfig {
     ladderExitEndPct: 1,
     signalExpiryCandles: 18,
     backtestSymbols: ["BTC"],
+    backtestTradingStartTimeMs: Date.UTC(2026, 1, 21, 0, 0, 0, 0),
     backtestLookbackCandles: 900,
     manualRangeFile: "manual-ranges.json",
     manualRangeStateFile: "manual-range-state.json",

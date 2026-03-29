@@ -26,7 +26,6 @@ import { createAllStrategies } from "../../strategies/index.js";
 
 const RESEARCH_START_TIME = Date.UTC(2026, 2, 0, 0, 0, 0, 0);
 const RESEARCH_END_TIME = Date.UTC(2027, 2, 28, 23, 59, 59, 999);
-const BACKTEST_TRADING_START_TIME = Date.UTC(2026, 1, 21, 0, 0, 0, 0);
 
 interface StrategyComparisonRow {
   strategyId: string;
@@ -97,6 +96,7 @@ function collectFilledTradeDetections(
   symbol: string,
   filledTradeDetections: Record<string, string[]>,
   loggedFilledPositionIds: Set<string>,
+  tradingStartTimeMs: number,
 ): void {
   const candidatePositions = [
     ...snapshot.openPositions,
@@ -115,7 +115,7 @@ function collectFilledTradeDetections(
     }
 
     loggedFilledPositionIds.add(position.id);
-    if (firstFillTime < BACKTEST_TRADING_START_TIME || firstFillTime > RESEARCH_END_TIME) {
+    if (firstFillTime < tradingStartTimeMs || firstFillTime > RESEARCH_END_TIME) {
       continue;
     }
 
@@ -149,12 +149,13 @@ async function runBacktest(
   slippageRate: number,
 ): Promise<StrategyBacktestResult> {
   const config = loadConfig();
+  const tradingStartTimeMs = config.backtestTradingStartTimeMs;
   const broker = new PaperBroker(startingBalanceUsd, positionSizeUsd, {
     feeRate,
     slippageRate,
   });
   await broker.initialize();
-  const effectiveManualRanges = buildEffectiveManualRangeMap(manualRanges, BACKTEST_TRADING_START_TIME);
+  const effectiveManualRanges = buildEffectiveManualRangeMap(manualRanges, tradingStartTimeMs);
   const symbols = Object.keys(candlesBySymbol);
   const markPrices = new Map<string, number>();
   const manualRangeStates = new Map<string, ManualRangeState>();
@@ -188,6 +189,7 @@ async function runBacktest(
         symbol,
         filledTradeDetections,
         loggedFilledPositionIds,
+        tradingStartTimeMs,
       );
       updatedSymbols.push(symbol);
     }
@@ -231,7 +233,7 @@ async function runBacktest(
         ...(manualRange ? { manualRange } : {}),
         ...(manualRangeState ? { manualRangeState } : {}),
       };
-      if (timestamp < BACKTEST_TRADING_START_TIME) {
+      if (timestamp < tradingStartTimeMs) {
         continue;
       }
       const result = strategy.evaluate(strategyContext);
@@ -253,6 +255,7 @@ async function runBacktest(
           symbol,
           filledTradeDetections,
           loggedFilledPositionIds,
+          tradingStartTimeMs,
         );
       }
     }
@@ -337,7 +340,7 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const client = new HyperliquidClient(config.apiBaseUrl);
   const manualRanges = await loadManualRanges(config.manualRangeFile);
-  const symbols = [...new Set([...config.backtestSymbols, ...Object.keys(manualRanges)])];
+  const symbols = [...new Set(config.backtestSymbols)];
 
   console.log(`[research] Fetching research candles for ${formatConsoleSymbolList(symbols)}.`);
   const researchLines = await buildRangeResearchReport(client, config, symbols);
@@ -357,7 +360,7 @@ async function main(): Promise<void> {
     `[backtest] Manual range state is simulated in-memory from those candles only; ${config.manualRangeStateFile} is not loaded.`,
   );
   console.log(
-    `[backtest] Strategy evaluation and order generation begin at ${formatConsoleTimestamp(BACKTEST_TRADING_START_TIME)}; earlier candles are warmup/history only.`,
+    `[backtest] Strategy evaluation and order generation begin at ${formatConsoleTimestamp(config.backtestTradingStartTimeMs)}; earlier candles are warmup/history only.`,
   );
   const strategies = createAllStrategies();
   const results = await Promise.all(

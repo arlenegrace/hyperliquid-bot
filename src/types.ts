@@ -183,6 +183,8 @@ export interface BotConfig {
   ladderExitEndPct: number;
   signalExpiryCandles: number;
   backtestSymbols: string[];
+  /** First candle close time (ms UTC) at which backtest strategies may place orders; earlier candles are warmup only. */
+  backtestTradingStartTimeMs: number;
   backtestLookbackCandles: number;
   manualRangeFile: string;
   manualRangeStateFile: string;
