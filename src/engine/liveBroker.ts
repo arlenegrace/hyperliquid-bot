@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { HyperliquidExchangeGateway, type HyperliquidFill, type HyperliquidPlaceOrderSpec } from "../clients/hyperliquidExchange.js";
+import {
+  HyperliquidExchangeGateway,
+  type HyperliquidAccountSnapshot,
+  type HyperliquidFill,
+  type HyperliquidPlaceOrderSpec,
+} from "../clients/hyperliquidExchange.js";
 import type {
   BotConfig,
   BrokerPosition,
@@ -101,6 +106,7 @@ export class HyperliquidLiveBroker implements Broker {
   private readonly closedPositions: BrokerPosition[] = [];
   private readonly cancelledPositions: BrokerPosition[] = [];
   private readonly lastMarks = new Map<string, number>();
+  private readonly lastExchangeUnrealizedBySymbol = new Map<string, number>();
   private readonly processedTradeIds = new Set<number>();
 
   private accountAddress?: `0x${string}`;
@@ -136,7 +142,7 @@ export class HyperliquidLiveBroker implements Broker {
     await this.loadState();
 
     const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
-    this.currentAccountValueUsd = accountSnapshot.accountValueUsd;
+    this.applyAccountSnapshotPricing(accountSnapshot);
     if (this.startingBalanceUsd <= 0) {
       this.startingBalanceUsd = accountSnapshot.accountValueUsd;
       this.peakEquityUsd = accountSnapshot.accountValueUsd;
@@ -184,6 +190,16 @@ export class HyperliquidLiveBroker implements Broker {
     return this.syncRemoteState();
   }
 
+  async prepareSnapshot(): Promise<void> {
+    await this.assertInitialized();
+    if (!this.accountAddress) {
+      return;
+    }
+
+    const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
+    this.applyAccountSnapshotPricing(accountSnapshot);
+  }
+
   hasOpenPosition(symbol: string, strategyId: string): boolean {
     return this.getOpenPositions(symbol, strategyId).length > 0;
   }
@@ -195,18 +211,7 @@ export class HyperliquidLiveBroker implements Broker {
   }
 
   snapshot(): BrokerSnapshot {
-    const unrealizedPnlUsd = [...this.openPositions.values()].reduce((sum, position) => {
-      if (position.status !== "open" || position.averageEntryPrice === undefined) {
-        return sum;
-      }
-
-      const markPrice = this.lastMarks.get(position.symbol);
-      if (!markPrice) {
-        return sum;
-      }
-
-      return sum + calculatePnlUsd(position.side, position.averageEntryPrice, markPrice, position.remainingSizeUnits);
-    }, 0);
+    const unrealizedPnlUsd = this.computeUnrealizedPnlUsd();
 
     const localEquityUsd = this.startingBalanceUsd + this.realizedPnlUsd + unrealizedPnlUsd;
 
@@ -225,6 +230,50 @@ export class HyperliquidLiveBroker implements Broker {
       closedPositions: this.closedPositions.map(clonePosition),
       cancelledPositions: this.cancelledPositions.map(clonePosition),
     };
+  }
+
+  private applyAccountSnapshotPricing(accountSnapshot: HyperliquidAccountSnapshot): void {
+    this.currentAccountValueUsd = accountSnapshot.accountValueUsd;
+    this.lastExchangeUnrealizedBySymbol.clear();
+    for (const [symbol, pos] of accountSnapshot.positionsBySymbol) {
+      this.lastExchangeUnrealizedBySymbol.set(symbol, pos.unrealizedPnlUsd);
+    }
+  }
+
+  /** Clearinghouse uPnL when available; else candle marks (e.g. after a failed sync). */
+  private computeUnrealizedPnlUsd(): number {
+    const symbolsWithOpen = new Set<string>();
+    for (const position of this.openPositions.values()) {
+      if (position.status === "open" && position.averageEntryPrice !== undefined) {
+        symbolsWithOpen.add(position.symbol);
+      }
+    }
+
+    if (symbolsWithOpen.size === 0) {
+      return 0;
+    }
+
+    let total = 0;
+    for (const symbol of symbolsWithOpen) {
+      const exchangeU = this.lastExchangeUnrealizedBySymbol.get(symbol);
+      if (exchangeU !== undefined) {
+        total += exchangeU;
+        continue;
+      }
+
+      for (const position of this.openPositions.values()) {
+        if (position.symbol !== symbol || position.status !== "open" || position.averageEntryPrice === undefined) {
+          continue;
+        }
+
+        const markPrice = this.lastMarks.get(position.symbol);
+        if (markPrice) {
+          total += calculatePnlUsd(position.side, position.averageEntryPrice, markPrice, position.remainingSizeUnits);
+        }
+      }
+    }
+
+    return total;
   }
 
   async openPosition(signal: StrategySignal): Promise<string[]> {
@@ -411,7 +460,7 @@ export class HyperliquidLiveBroker implements Broker {
         this.gateway.fetchFillsSince(this.accountAddress, fillStartTime, syncStartedAt),
       ]);
 
-    this.currentAccountValueUsd = accountSnapshot.accountValueUsd;
+    this.applyAccountSnapshotPricing(accountSnapshot);
     this.openExchangeOrderIds = new Set(
       openOrders.flatMap((order) => (order.clientOrderId ? [order.clientOrderId] : [])),
     );

@@ -17,6 +17,16 @@ export function formatRealizedPnlUsdColored(usd: number): string {
   return `${ANSI_GREEN}${text}${ANSI_RESET}`;
 }
 
+/** Like {@link formatRealizedPnlUsdColored} but with an explicit `+` on zero or profit (e.g. `+0.01 USD`). */
+export function formatSignedPnlUsdColored(usd: number): string {
+  const sign = usd >= 0 ? "+" : "";
+  const text = `${sign}${usd.toFixed(2)} USD`;
+  if (usd < 0) {
+    return `${ANSI_RED}${text}${ANSI_RESET}`;
+  }
+  return `${ANSI_GREEN}${text}${ANSI_RESET}`;
+}
+
 export function formatConsoleSymbol(symbol: string): string {
   return `$${symbol.toUpperCase()}`;
 }

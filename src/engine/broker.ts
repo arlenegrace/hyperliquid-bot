@@ -8,6 +8,8 @@ export interface Broker {
 
   hasOpenPosition(symbol: string, strategyId: string): boolean;
   getOpenPositions(symbol: string, strategyId: string): BrokerPosition[];
+  /** Live: refresh exchange pricing before snapshot(); paper no-op. */
+  prepareSnapshot(): Promise<void>;
   snapshot(): BrokerSnapshot;
 
   openPosition(signal: StrategySignal): Promise<string[]>;

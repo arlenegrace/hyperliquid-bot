@@ -98,6 +98,8 @@ export class PaperBroker implements Broker {
     );
   }
 
+  async prepareSnapshot(): Promise<void> {}
+
   async openPosition(signal: StrategySignal): Promise<string[]> {
     const entryOrders = this.buildEntryOrders(signal);
     const intendedSizeUnits = entryOrders.reduce((sum, order) => sum + order.sizeUnits, 0);

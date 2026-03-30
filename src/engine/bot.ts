@@ -5,7 +5,7 @@ import {
   formatConsoleSymbol,
   formatConsoleSymbolListGreen,
   formatConsoleTimestamp,
-  formatRealizedPnlUsdColored,
+  formatSignedPnlUsdColored,
   normalizeConsoleMessage,
 } from "../consoleFormat.js";
 import type { BotConfig, TradingStrategy } from "../types.js";
@@ -47,9 +47,10 @@ export class TradingBot {
       await this.processSymbol(symbol, manualRanges);
     }
 
+    await this.broker.prepareSnapshot();
     const snapshot = this.broker.snapshot();
     console.log(
-      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, realized PnL: ${formatRealizedPnlUsdColored(snapshot.realizedPnlUsd)}.`,
+      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedPnlUsdColored(snapshot.unrealizedPnlUsd)}, realized PnL: ${formatSignedPnlUsdColored(snapshot.realizedPnlUsd)}.`,
     );
     await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
   }
