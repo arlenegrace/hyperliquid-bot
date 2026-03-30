@@ -16,10 +16,15 @@ import type {
 } from "../types.js";
 import { wrapOrange } from "../consoleFormat.js";
 import type { Broker } from "./broker.js";
-import { buildPlannedEntryOrders, calculatePlannedEntryNotionalUsd } from "./liveGuardrails.js";
+import {
+  allocatePrioritizedExitOrderTargets,
+  buildPlannedEntryOrders,
+  calculatePlannedEntryNotionalUsd,
+} from "./liveGuardrails.js";
 
 const POSITION_EPSILON = 1e-9;
 const PROCESSED_TRADE_ID_LIMIT = 5_000;
+const MIN_TAKE_PROFIT_ORDER_NOTIONAL_USD = 10;
 
 interface LiveBrokerStateFile {
   startingBalanceUsd: number;
@@ -641,6 +646,7 @@ export class HyperliquidLiveBroker implements Broker {
   private async ensureProtectiveOrdersForPosition(position: BrokerPosition): Promise<string[]> {
     const logs: string[] = [];
     const protectiveOrderSpecs: HyperliquidPlaceOrderSpec[] = [];
+    const assetInfo = this.gateway.getAssetInfo(position.symbol);
 
     const desiredStop = {
       price: position.stopLoss,
@@ -685,8 +691,15 @@ export class HyperliquidLiveBroker implements Broker {
       });
     }
 
+    const desiredExitSizeUnits = allocatePrioritizedExitOrderTargets({
+      totalSizeUnits: position.filledSizeUnits,
+      exitPrices: position.exitOrders.map((order) => order.price),
+      sizeDecimals: assetInfo.szDecimals,
+      minOrderNotionalUsd: MIN_TAKE_PROFIT_ORDER_NOTIONAL_USD,
+    });
+
     for (const [index, order] of position.exitOrders.entries()) {
-      const desiredTotalSizeUnits = position.filledSizeUnits * order.sizeFraction;
+      const desiredTotalSizeUnits = desiredExitSizeUnits[index] ?? 0;
       const desiredOpenSizeUnits = Math.max(0, desiredTotalSizeUnits - (order.filledSizeUnits ?? 0));
       const currentOutstandingSizeUnits = Math.max(0, order.sizeUnits - (order.filledSizeUnits ?? 0));
       const orderIsOpen = order.clientOrderId ? this.openExchangeOrderIds.has(order.clientOrderId) : false;

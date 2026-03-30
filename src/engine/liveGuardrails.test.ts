@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPlannedEntryOrders, calculatePlannedEntryNotionalUsd } from "./liveGuardrails.js";
+import {
+  allocatePrioritizedExitOrderTargets,
+  buildPlannedEntryOrders,
+  calculatePlannedEntryNotionalUsd,
+} from "./liveGuardrails.js";
 import type { StrategySignal } from "../types.js";
 
 function createSignal(overrides: Partial<StrategySignal> = {}): StrategySignal {
@@ -62,4 +66,48 @@ test("buildPlannedEntryOrders sizes entries from risk budget", () => {
 test("calculatePlannedEntryNotionalUsd sums the ladder notional", () => {
   const orders = buildPlannedEntryOrders(createSignal(), 250);
   assert.equal(calculatePlannedEntryNotionalUsd(orders), 2_760);
+});
+
+test("allocatePrioritizedExitOrderTargets keeps five fractional take-profit orders when precision allows", () => {
+  const targets = allocatePrioritizedExitOrderTargets({
+    totalSizeUnits: 17,
+    exitPrices: [1.45, 1.46, 1.47, 1.48, 1.49],
+    sizeDecimals: 1,
+    minOrderNotionalUsd: 0,
+  });
+
+  assert.deepEqual(targets, [3.4, 3.4, 3.4, 3.4, 3.4]);
+});
+
+test("allocatePrioritizedExitOrderTargets pushes any precision remainder into the first take-profit order", () => {
+  const targets = allocatePrioritizedExitOrderTargets({
+    totalSizeUnits: 17.1,
+    exitPrices: [1.45, 1.46, 1.47, 1.48, 1.49],
+    sizeDecimals: 1,
+    minOrderNotionalUsd: 0,
+  });
+
+  assert.deepEqual(targets, [3.5, 3.4, 3.4, 3.4, 3.4]);
+});
+
+test("allocatePrioritizedExitOrderTargets drops only the highest-priority tail orders when minimum notional blocks all five", () => {
+  const targets = allocatePrioritizedExitOrderTargets({
+    totalSizeUnits: 30,
+    exitPrices: [1.45, 1.46, 1.47, 1.48, 1.49],
+    sizeDecimals: 1,
+    minOrderNotionalUsd: 10,
+  });
+
+  assert.deepEqual(targets, [7.5, 7.5, 7.5, 7.5, 0]);
+});
+
+test("allocatePrioritizedExitOrderTargets can collapse to two take-profit orders when smaller slices would be rejected", () => {
+  const targets = allocatePrioritizedExitOrderTargets({
+    totalSizeUnits: 17,
+    exitPrices: [1.45, 1.46, 1.47, 1.48, 1.49],
+    sizeDecimals: 1,
+    minOrderNotionalUsd: 10,
+  });
+
+  assert.deepEqual(targets, [8.5, 8.5, 0, 0, 0]);
 });

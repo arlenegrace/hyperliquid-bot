@@ -42,3 +42,53 @@ export function buildPlannedEntryOrders(
 export function calculatePlannedEntryNotionalUsd(entryOrders: PositionEntryOrder[]): number {
   return entryOrders.reduce((sum, order) => sum + order.sizeUnits * order.price, 0);
 }
+
+interface ExitOrderTargetOptions {
+  totalSizeUnits: number;
+  exitPrices: number[];
+  sizeDecimals: number;
+  minOrderNotionalUsd: number;
+}
+
+function allocateEvenSizeSteps(totalSizeSteps: number, orderCount: number): number[] {
+  const baseStepsPerOrder = Math.floor(totalSizeSteps / orderCount);
+  const leftoverSteps = totalSizeSteps - baseStepsPerOrder * orderCount;
+
+  return Array.from({ length: orderCount }, (_, index) =>
+    index === 0 ? baseStepsPerOrder + leftoverSteps : baseStepsPerOrder,
+  );
+}
+
+export function allocatePrioritizedExitOrderTargets({
+  totalSizeUnits,
+  exitPrices,
+  sizeDecimals,
+  minOrderNotionalUsd,
+}: ExitOrderTargetOptions): number[] {
+  if (exitPrices.length === 0 || totalSizeUnits <= POSITION_EPSILON) {
+    return exitPrices.map(() => 0);
+  }
+
+  const sizeFactor = 10 ** sizeDecimals;
+  const totalSizeSteps = Math.max(0, Math.round(totalSizeUnits * sizeFactor));
+  if (totalSizeSteps === 0) {
+    return exitPrices.map(() => 0);
+  }
+
+  const maxCandidateOrders = Math.min(exitPrices.length, totalSizeSteps);
+  for (let activeOrderCount = maxCandidateOrders; activeOrderCount >= 1; activeOrderCount -= 1) {
+    const allocatedSteps = allocateEvenSizeSteps(totalSizeSteps, activeOrderCount);
+    const meetsMinimumNotional = allocatedSteps.every((sizeSteps, index) => {
+      const sizeUnits = sizeSteps / sizeFactor;
+      return sizeUnits > POSITION_EPSILON && sizeUnits * exitPrices[index]! + POSITION_EPSILON >= minOrderNotionalUsd;
+    });
+
+    if (!meetsMinimumNotional) {
+      continue;
+    }
+
+    return exitPrices.map((_, index) => (index < activeOrderCount ? allocatedSteps[index]! / sizeFactor : 0));
+  }
+
+  return exitPrices.map(() => 0);
+}
