@@ -195,6 +195,34 @@ export class HyperliquidExchangeGateway {
     return leverage;
   }
 
+  /**
+   * Sum of all `userFunding` ledger `delta.usdc` amounts (lifetime, all perp coins).
+   * Paginates by `startTime` until a page is empty.
+   */
+  async fetchUserLifetimeFundingUsd(accountAddress: `0x${string}`): Promise<number> {
+    let total = 0;
+    let startTime = 0;
+    for (let guard = 0; guard < 10_000; guard++) {
+      const rows = await this.infoClient.userFunding({ user: accountAddress, startTime });
+      if (rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        total += parseNumber(String(row.delta.usdc).trim());
+      }
+
+      const nextStart = Math.max(...rows.map((r) => r.time)) + 1;
+      if (nextStart <= startTime) {
+        break;
+      }
+
+      startTime = nextStart;
+    }
+
+    return total;
+  }
+
   async fetchAccountSnapshot(accountAddress: `0x${string}`): Promise<HyperliquidAccountSnapshot> {
     const state = await this.infoClient.clearinghouseState({ user: accountAddress });
     const positionsBySymbol = new Map<string, HyperliquidAccountPosition>();

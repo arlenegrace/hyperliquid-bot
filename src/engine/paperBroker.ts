@@ -295,6 +295,7 @@ export class PaperBroker implements Broker {
     return {
       startingBalanceUsd: this.startingBalanceUsd,
       realizedPnlUsd: this.realizedPnlUsd,
+      lifetimeFundingUsd: 0,
       unrealizedPnlUsd,
       equityUsd: this.startingBalanceUsd + this.realizedPnlUsd + unrealizedPnlUsd,
       maxDrawdownPct: this.maxDrawdownPct,

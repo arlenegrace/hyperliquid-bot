@@ -124,6 +124,8 @@ export class HyperliquidLiveBroker implements Broker {
   private lastSyncTime = 0;
   private openExchangeOrderIds = new Set<string>();
   private initialized = false;
+  /** Cumulative net funding from `userFunding` (refreshed each prepareSnapshot). */
+  private lifetimeFundingUsd = 0;
 
   constructor(
     private readonly config: BotConfig,
@@ -198,6 +200,12 @@ export class HyperliquidLiveBroker implements Broker {
 
     const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
     this.applyAccountSnapshotPricing(accountSnapshot);
+
+    try {
+      this.lifetimeFundingUsd = await this.gateway.fetchUserLifetimeFundingUsd(this.accountAddress);
+    } catch {
+      // Keep last known value on transient API errors.
+    }
   }
 
   hasOpenPosition(symbol: string, strategyId: string): boolean {
@@ -218,6 +226,7 @@ export class HyperliquidLiveBroker implements Broker {
     return {
       startingBalanceUsd: this.startingBalanceUsd,
       realizedPnlUsd: this.realizedPnlUsd,
+      lifetimeFundingUsd: this.lifetimeFundingUsd,
       unrealizedPnlUsd,
       equityUsd: this.currentAccountValueUsd ?? localEquityUsd,
       maxDrawdownPct: this.maxDrawdownPct,

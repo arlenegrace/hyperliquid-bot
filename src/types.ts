@@ -284,7 +284,13 @@ export type PaperPosition = BrokerPosition;
 
 export interface BrokerSnapshot {
   startingBalanceUsd: number;
+  /** Closed-trade PnL from fills (fees included); excludes perp funding payments. */
   realizedPnlUsd: number;
+  /**
+   * Cumulative net USDC from perpetual funding (positive = received, negative = paid).
+   * Live: from exchange `userFunding` history. Paper: always 0.
+   */
+  lifetimeFundingUsd: number;
   unrealizedPnlUsd: number;
   equityUsd: number;
   maxDrawdownPct: number;

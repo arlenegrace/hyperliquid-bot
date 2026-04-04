@@ -49,8 +49,13 @@ export class TradingBot {
 
     await this.broker.prepareSnapshot();
     const snapshot = this.broker.snapshot();
+    const realizedInclFundingUsd = snapshot.realizedPnlUsd + snapshot.lifetimeFundingUsd;
+    const fundingNote =
+      snapshot.lifetimeFundingUsd !== 0
+        ? ` (trades ${formatSignedPnlUsdColored(snapshot.realizedPnlUsd)}, funding ${formatSignedPnlUsdColored(snapshot.lifetimeFundingUsd)})`
+        : "";
     console.log(
-      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedPnlUsdColored(snapshot.unrealizedPnlUsd)}, realized PnL: ${formatSignedPnlUsdColored(snapshot.realizedPnlUsd)}.`,
+      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedPnlUsdColored(snapshot.unrealizedPnlUsd)}, realized PnL: ${formatSignedPnlUsdColored(realizedInclFundingUsd)}${fundingNote}.`,
     );
     await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
   }
