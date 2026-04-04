@@ -2,8 +2,8 @@
   "ranges": [
     {
       "symbol": "BTC",
-      "rangeLow": 65100,
-      "rangeHigh": 72200,
+      "rangeLow": 65097,
+      "rangeHigh": 72271,
       "validFromTime": "2026-02-12T20:00:00.000Z",
       "notes": "Based on Feb 8 high and Feb 12 low."
     },
@@ -23,14 +23,14 @@
     },
     {
       "symbol": "CRV",
-      "rangeLow": 0.22479,
+      "rangeLow": 0.20373,
       "rangeHigh": 0.264,
       "validFromTime": "2026-02-11T12:00:00.000Z",
       "notes": "CRV range: Feb 6 16:00 UTC high and Feb 11 12:00 UTC low."
     },
     {
       "symbol": "BNB",
-      "rangeLow": 587.08,
+      "rangeLow": 569.46,
       "rangeHigh": 669.14,
       "validFromTime": "2026-02-11T08:00:00.000Z",
       "notes": "BNB range: Feb 6 16:00 UTC high and Feb 11 8:00 UTC low."
