@@ -875,8 +875,9 @@ export class HyperliquidLiveBroker implements Broker {
       }
     }
 
-    const exitOrders =
-      options.exitOrderIndexes === undefined
+    const exitOrders = options.stopOnly
+      ? []
+      : options.exitOrderIndexes === undefined
         ? position.exitOrders.map((order, index) => ({ order, index }))
         : options.exitOrderIndexes.map((index) => ({ order: position.exitOrders[index]!, index }));
     for (const { order } of exitOrders) {
@@ -888,11 +889,12 @@ export class HyperliquidLiveBroker implements Broker {
       order.status = "cancelled";
     }
 
-    if (position.stopOrder?.clientOrderId && this.openExchangeOrderIds.has(position.stopOrder.clientOrderId)) {
-      if (options.exitOrderIndexes === undefined || options.stopOnly) {
-        requests.push({ symbol: position.symbol, clientOrderId: position.stopOrder.clientOrderId });
-        position.stopOrder.status = "cancelled";
-      }
+    // Always try cancel-by-cloid when we have a stored id. Relying on `openExchangeOrderIds` alone
+    // misses live trigger orders if the info API omits `cloid` on some rows — then we would place a
+    // replacement SL without cancelling the old one (duplicate stops on partial ladder fills).
+    if (position.stopOrder?.clientOrderId && (options.exitOrderIndexes === undefined || options.stopOnly)) {
+      requests.push({ symbol: position.symbol, clientOrderId: position.stopOrder.clientOrderId });
+      position.stopOrder.status = "cancelled";
     }
 
     if (requests.length === 0) {
