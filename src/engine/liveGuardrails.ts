@@ -2,6 +2,63 @@ import type { PositionEntryOrder, StrategySignal, TradeSide } from "../types.js"
 
 const POSITION_EPSILON = 1e-9;
 
+/** When set, entry sizes are rounded to the exchange step size; leftover steps go to orders farthest from the opposite range edge (long: highest price first, short: lowest price first). */
+export interface EntrySizeAllocationOptions {
+  szDecimals: number;
+}
+
+/**
+ * Splits total coin budget (positionSizeUsd / entryReferencePrice) across n orders in equal base steps,
+ * then assigns any remainder steps to the highest-priority orders (long: highest limit price first;
+ * short: lowest limit price first) so total size approaches the env budget without falling short from
+ * independent per-order flooring.
+ */
+export function allocateEntryOrderSizeUnits({
+  positionSizeUsd,
+  entryReferencePrice,
+  orderPrices,
+  szDecimals,
+  side,
+}: {
+  positionSizeUsd: number;
+  entryReferencePrice: number;
+  orderPrices: number[];
+  szDecimals: number;
+  side: TradeSide;
+}): number[] {
+  const n = orderPrices.length;
+  if (n === 0) {
+    return [];
+  }
+
+  const quantum = 10 ** -szDecimals;
+  const totalUnits = positionSizeUsd / entryReferencePrice;
+  const totalSteps = Math.floor(totalUnits / quantum + POSITION_EPSILON);
+  if (totalSteps <= 0) {
+    return orderPrices.map(() => 0);
+  }
+
+  const basePerOrder = Math.floor(totalSteps / n);
+  const remainder = totalSteps - basePerOrder * n;
+
+  const priorityIndices = orderPrices.map((_, index) => index);
+  if (side === "long") {
+    priorityIndices.sort((a, b) => (orderPrices[b] ?? 0) - (orderPrices[a] ?? 0));
+  } else {
+    priorityIndices.sort((a, b) => (orderPrices[a] ?? 0) - (orderPrices[b] ?? 0));
+  }
+
+  const steps = new Array<number>(n).fill(basePerOrder);
+  for (let k = 0; k < remainder; k++) {
+    const idx = priorityIndices[k];
+    if (idx !== undefined) {
+      steps[idx] += 1;
+    }
+  }
+
+  return steps.map((s) => s * quantum);
+}
+
 function stopDistance(side: TradeSide, entryPrice: number, stopLoss: number): number {
   if (side === "long") {
     return entryPrice - stopLoss;
@@ -13,6 +70,7 @@ function stopDistance(side: TradeSide, entryPrice: number, stopLoss: number): nu
 export function buildPlannedEntryOrders(
   signal: StrategySignal,
   defaultPositionSizeUsd: number,
+  allocation?: EntrySizeAllocationOptions,
 ): PositionEntryOrder[] {
   if (signal.maxRiskUsd !== undefined) {
     return signal.entryOrders.map((order) => {
@@ -31,6 +89,24 @@ export function buildPlannedEntryOrders(
   }
 
   const positionSizeUsd = signal.positionSizeUsd ?? defaultPositionSizeUsd;
+
+  if (allocation !== undefined) {
+    const orderPrices = signal.entryOrders.map((order) => order.price);
+    const sizeUnitsList = allocateEntryOrderSizeUnits({
+      positionSizeUsd,
+      entryReferencePrice: signal.entryReferencePrice,
+      orderPrices,
+      szDecimals: allocation.szDecimals,
+      side: signal.side,
+    });
+
+    return signal.entryOrders.map((order, index) => ({
+      ...order,
+      sizeUnits: sizeUnitsList[index] ?? 0,
+      status: "pending",
+    }));
+  }
+
   const intendedSizeUnits = positionSizeUsd / signal.entryReferencePrice;
   return signal.entryOrders.map((order) => ({
     ...order,

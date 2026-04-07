@@ -288,7 +288,10 @@ export class HyperliquidLiveBroker implements Broker {
   async openPosition(signal: StrategySignal): Promise<string[]> {
     await this.assertInitialized();
     const logs: string[] = [];
-    const entryOrders = buildPlannedEntryOrders(signal, this.config.positionSizeUsd);
+    const assetInfo = this.gateway.getAssetInfo(signal.symbol);
+    const entryOrders = buildPlannedEntryOrders(signal, this.config.positionSizeUsd, {
+      szDecimals: assetInfo.szDecimals,
+    });
     const intendedSizeUnits = entryOrders.reduce((sum, order) => sum + order.sizeUnits, 0);
     const intendedNotionalUsd = calculatePlannedEntryNotionalUsd(entryOrders);
 
@@ -358,14 +361,13 @@ export class HyperliquidLiveBroker implements Broker {
       const clientOrderId = this.buildClientOrderId(position.id, `entry-${index}`);
       order.clientOrderId = clientOrderId;
 
-      const shouldAggress = isSameNumber(order.price, signal.entryReferencePrice, 1e-4);
       return {
         symbol: signal.symbol,
         side: signal.side,
-        price: shouldAggress ? this.applySlippage(signal.side, signal.entryReferencePrice) : order.price,
+        price: order.price,
         sizeUnits: order.sizeUnits,
         reduceOnly: false,
-        tif: shouldAggress ? "FrontendMarket" : "Gtc",
+        tif: "Gtc",
         clientOrderId,
       } satisfies HyperliquidPlaceOrderSpec;
     });

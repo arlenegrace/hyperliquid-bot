@@ -8,6 +8,7 @@ import type {
   TradeSide,
 } from "../types.js";
 import type { Broker } from "./broker.js";
+import { buildPlannedEntryOrders } from "./liveGuardrails.js";
 
 const POSITION_EPSILON = 1e-9;
 
@@ -31,14 +32,6 @@ function orderWasTouched(orderPrice: number, candle: Candle): boolean {
   return candle.low <= orderPrice && candle.high >= orderPrice;
 }
 
-function stopDistance(side: TradeSide, entryPrice: number, stopLoss: number): number {
-  if (side === "long") {
-    return entryPrice - stopLoss;
-  }
-
-  return stopLoss - entryPrice;
-}
-
 function clonePosition(position: BrokerPosition): BrokerPosition {
   return {
     ...position,
@@ -53,6 +46,8 @@ function clonePosition(position: BrokerPosition): BrokerPosition {
 interface PaperBrokerExecutionOptions {
   feeRate?: number;
   slippageRate?: number;
+  /** Rounds entry ladder sizes like live (default 4). Override for assets with fewer size decimals. */
+  paperSizeDecimals?: number;
 }
 
 export class PaperBroker implements Broker {
@@ -311,30 +306,13 @@ export class PaperBroker implements Broker {
   }
 
   private buildEntryOrders(signal: StrategySignal): PositionEntryOrder[] {
-    if (signal.maxRiskUsd !== undefined) {
-      return signal.entryOrders.map((order) => {
-        const riskFraction = order.riskFraction ?? order.sizeFraction ?? 0;
-        const riskBudgetUsd = signal.maxRiskUsd! * riskFraction;
-        const distanceToStop = stopDistance(signal.side, order.price, signal.stopLoss);
-        const sizeUnits = distanceToStop <= POSITION_EPSILON ? 0 : riskBudgetUsd / distanceToStop;
-
-        return {
-          ...order,
-          sizeUnits,
-          riskBudgetUsd,
-          status: "pending",
-        };
-      });
-    }
-
-    const positionSizeUsd = signal.positionSizeUsd ?? this.defaultPositionSizeUsd;
-    const intendedSizeUnits = positionSizeUsd / signal.entryReferencePrice;
-
-    return signal.entryOrders.map((order) => ({
-      ...order,
-      sizeUnits: intendedSizeUnits * (order.sizeFraction ?? order.riskFraction ?? 0),
-      status: "pending",
-    }));
+    return buildPlannedEntryOrders(
+      signal,
+      this.defaultPositionSizeUsd,
+      signal.maxRiskUsd === undefined
+        ? { szDecimals: this.executionOptions.paperSizeDecimals ?? 4 }
+        : undefined,
+    );
   }
 
   private getPendingEntryOrders(position: BrokerPosition): PositionEntryOrder[] {

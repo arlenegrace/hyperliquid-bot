@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  allocateEntryOrderSizeUnits,
   allocatePrioritizedExitOrderTargets,
   buildPlannedEntryOrders,
   calculatePlannedEntryNotionalUsd,
@@ -66,6 +67,32 @@ test("buildPlannedEntryOrders sizes entries from risk budget", () => {
 test("calculatePlannedEntryNotionalUsd sums the ladder notional", () => {
   const orders = buildPlannedEntryOrders(createSignal(), 250);
   assert.equal(calculatePlannedEntryNotionalUsd(orders), 2_760);
+});
+
+test("allocateEntryOrderSizeUnits gives remainder steps to highest-priced long limits first", () => {
+  const prices = [94.058, 93.661, 93.263, 92.865, 92.468];
+  const sizes = allocateEntryOrderSizeUnits({
+    positionSizeUsd: 120,
+    entryReferencePrice: 93.5,
+    orderPrices: prices,
+    szDecimals: 2,
+    side: "long",
+  });
+
+  assert.deepEqual(sizes, [0.26, 0.26, 0.26, 0.25, 0.25]);
+});
+
+test("allocateEntryOrderSizeUnits gives remainder steps to lowest-priced short limits first", () => {
+  const prices = [92.468, 92.865, 93.263, 93.661, 94.058];
+  const sizes = allocateEntryOrderSizeUnits({
+    positionSizeUsd: 120,
+    entryReferencePrice: 93.5,
+    orderPrices: prices,
+    szDecimals: 2,
+    side: "short",
+  });
+
+  assert.deepEqual(sizes, [0.26, 0.26, 0.26, 0.25, 0.25]);
 });
 
 test("allocatePrioritizedExitOrderTargets keeps five fractional take-profit orders when precision allows", () => {
