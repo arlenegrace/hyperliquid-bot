@@ -73,6 +73,17 @@ export interface HyperliquidOrderPlacementResult {
   averageFillPrice?: number;
 }
 
+export interface HyperliquidCancelOrderRequest {
+  symbol: string;
+  orderId?: number;
+  clientOrderId?: `0x${string}`;
+}
+
+export interface HyperliquidCancelOrderResult extends HyperliquidCancelOrderRequest {
+  status: "success" | "error";
+  error?: string;
+}
+
 function parseNumber(value: string): number {
   return Number(value);
 }
@@ -83,6 +94,44 @@ function normalizeTradeSide(side: "B" | "A"): TradeSide {
 
 function normalizeWalletAddress(address: string): `0x${string}` {
   return address.toLowerCase() as `0x${string}`;
+}
+
+function isCancelErrorStatus(status: unknown): status is { error: string } {
+  return (
+    typeof status === "object" &&
+    status !== null &&
+    "error" in status &&
+    typeof (status as { error?: unknown }).error === "string"
+  );
+}
+
+function mapCancelResults(
+  requests: HyperliquidCancelOrderRequest[],
+  statuses: unknown[],
+): HyperliquidCancelOrderResult[] {
+  return requests.map((request, index) => {
+    const status = statuses[index];
+    if (status === "success") {
+      return {
+        ...request,
+        status: "success",
+      };
+    }
+
+    if (isCancelErrorStatus(status)) {
+      return {
+        ...request,
+        status: "error",
+        error: status.error,
+      };
+    }
+
+    return {
+      ...request,
+      status: "error",
+      error: "Unexpected cancel response from Hyperliquid.",
+    };
+  });
 }
 
 function resolveLeverageSetting(leverageSetting: LeverageSetting, assetInfo: HyperliquidAssetInfo): number {
@@ -351,18 +400,93 @@ export class HyperliquidExchangeGateway {
     });
   }
 
-  async cancelOrdersByCloid(
-    requests: Array<{ symbol: string; clientOrderId: `0x${string}` }>,
-  ): Promise<void> {
+  async cancelOrders(requests: HyperliquidCancelOrderRequest[]): Promise<HyperliquidCancelOrderResult[]> {
     if (requests.length === 0) {
-      return;
+      return [];
     }
 
-    await this.exchangeClient.cancelByCloid({
-      cancels: requests.map((request) => ({
-        asset: this.getAssetInfo(request.symbol).assetId,
-        cloid: request.clientOrderId,
-      })),
-    });
+    const results = new Array<HyperliquidCancelOrderResult | undefined>(requests.length);
+    const fallbackToCloid: Array<{ index: number; request: HyperliquidCancelOrderRequest; priorError: string }> = [];
+
+    const oidRequests = requests
+      .map((request, index) => ({ request, index }))
+      .filter((entry) => entry.request.orderId !== undefined);
+
+    if (oidRequests.length > 0) {
+      const response = await this.exchangeClient.cancel({
+        cancels: oidRequests.map(({ request }) => ({
+          a: this.getAssetInfo(request.symbol).assetId,
+          o: request.orderId!,
+        })),
+      });
+      const mappedResults = mapCancelResults(
+        oidRequests.map(({ request }) => request),
+        response.response.data.statuses as unknown[],
+      );
+
+      for (const [resultIndex, result] of mappedResults.entries()) {
+        const originalIndex = oidRequests[resultIndex]!.index;
+        const originalRequest = requests[originalIndex]!;
+        if (result.status === "success" || !originalRequest.clientOrderId) {
+          results[originalIndex] = result;
+          continue;
+        }
+
+        fallbackToCloid.push({
+          index: originalIndex,
+          request: originalRequest,
+          priorError: result.error ?? "cancel by oid failed",
+        });
+      }
+    }
+
+    const directCloidRequests = requests
+      .map((request, index) => ({ request, index }))
+      .filter((entry) => entry.request.orderId === undefined && entry.request.clientOrderId !== undefined);
+    const cloidRequests = [
+      ...directCloidRequests.map((entry) => ({ ...entry, priorError: undefined as string | undefined })),
+      ...fallbackToCloid,
+    ];
+
+    if (cloidRequests.length > 0) {
+      const response = await this.exchangeClient.cancelByCloid({
+        cancels: cloidRequests.map(({ request }) => ({
+          asset: this.getAssetInfo(request.symbol).assetId,
+          cloid: request.clientOrderId!,
+        })),
+      });
+      const mappedResults = mapCancelResults(
+        cloidRequests.map(({ request }) => request),
+        response.response.data.statuses as unknown[],
+      );
+
+      for (const [resultIndex, result] of mappedResults.entries()) {
+        const { index, request, priorError } = cloidRequests[resultIndex]!;
+        if (result.status === "success") {
+          results[index] = {
+            ...request,
+            status: "success",
+          };
+          continue;
+        }
+
+        results[index] = {
+          ...request,
+          status: "error",
+          error: priorError
+            ? `cancel by oid failed: ${priorError}; cancel by cloid failed: ${result.error ?? "unknown error"}`
+            : result.error ?? "cancel by cloid failed",
+        };
+      }
+    }
+
+    return requests.map(
+      (request, index) =>
+        results[index] ?? {
+          ...request,
+          status: "error",
+          error: "Cancel request is missing both oid and cloid.",
+        },
+    );
   }
 }

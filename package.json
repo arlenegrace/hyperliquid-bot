@@ -9,7 +9,7 @@
     "dev": "tsx src/index.ts",
     "research:range": "tsx src/analysis/rangeResearch.ts",
     "start": "node dist/src/index.js",
-    "test": "node --test --import tsx src/config.test.ts src/engine/createBroker.test.ts src/engine/liveGuardrails.test.ts src/engine/paperBroker.test.ts strategies/index.test.ts"
+    "test": "node --test --import tsx src/config.test.ts src/engine/createBroker.test.ts src/engine/liveBroker.test.ts src/engine/liveGuardrails.test.ts src/engine/paperBroker.test.ts strategies/index.test.ts"
   },
   "keywords": [
     "hyperliquid",

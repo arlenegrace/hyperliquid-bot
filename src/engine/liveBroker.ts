@@ -4,8 +4,11 @@ import path from "node:path";
 
 import {
   HyperliquidExchangeGateway,
+  type HyperliquidCancelOrderRequest,
+  type HyperliquidCancelOrderResult,
   type HyperliquidAccountSnapshot,
   type HyperliquidFill,
+  type HyperliquidOpenOrder,
   type HyperliquidPlaceOrderSpec,
 } from "../clients/hyperliquidExchange.js";
 import type {
@@ -30,6 +33,7 @@ import {
 const POSITION_EPSILON = 1e-9;
 const PROCESSED_TRADE_ID_LIMIT = 5_000;
 const MIN_TAKE_PROFIT_ORDER_NOTIONAL_USD = 10;
+type TrackedPositionOrder = PositionEntryOrder | PositionExitOrder | PositionStopOrder;
 
 interface LiveBrokerStateFile {
   startingBalanceUsd: number;
@@ -48,6 +52,15 @@ interface LiveBrokerStateFile {
   openPositions: BrokerPosition[];
   closedPositions: BrokerPosition[];
   cancelledPositions: BrokerPosition[];
+}
+
+interface CancelExchangeOrdersResult {
+  logs: string[];
+  trackedResults: Array<{
+    request: HyperliquidCancelOrderRequest;
+    order: TrackedPositionOrder;
+    result: HyperliquidCancelOrderResult;
+  }>;
 }
 
 function calculatePnlUsd(side: TradeSide, entryPrice: number, exitPrice: number, sizeUnits: number): number {
@@ -98,6 +111,10 @@ function toClientOrderId(seed: string): `0x${string}` {
   return `0x${hash}` as `0x${string}`;
 }
 
+function resolveCancelledOrderStatus(order: { filledSizeUnits?: number }): "filled" | "cancelled" {
+  return (order.filledSizeUnits ?? 0) > POSITION_EPSILON ? "filled" : "cancelled";
+}
+
 export class HyperliquidLiveBroker implements Broker {
   readonly mode = "live" as const;
 
@@ -122,10 +139,12 @@ export class HyperliquidLiveBroker implements Broker {
   private maxDrawdownPct = 0;
   private nextPositionSequence = 1;
   private lastSyncTime = 0;
-  private openExchangeOrderIds = new Set<string>();
+  private openExchangeOrderIds = new Set<`0x${string}`>();
+  private openExchangeOrderOids = new Set<number>();
   private initialized = false;
   /** Cumulative net funding from `userFunding` (refreshed each prepareSnapshot). */
   private lifetimeFundingUsd = 0;
+  private nextProtectiveOrderSequence = 1;
 
   constructor(
     private readonly config: BotConfig,
@@ -285,6 +304,41 @@ export class HyperliquidLiveBroker implements Broker {
     return total;
   }
 
+  private isOrderOpenOnExchange(order: { clientOrderId?: `0x${string}`; exchangeOrderId?: number }): boolean {
+    return (
+      (order.clientOrderId !== undefined && this.openExchangeOrderIds.has(order.clientOrderId)) ||
+      (order.exchangeOrderId !== undefined && this.openExchangeOrderOids.has(order.exchangeOrderId))
+    );
+  }
+
+  private hydrateTrackedExchangeOrderIds(
+    position: BrokerPosition,
+    openOrdersByClientOrderId: ReadonlyMap<`0x${string}`, HyperliquidOpenOrder>,
+  ): void {
+    const hydrateOrder = (order: { clientOrderId?: `0x${string}`; exchangeOrderId?: number }): void => {
+      if (!order.clientOrderId) {
+        return;
+      }
+
+      const openOrder = openOrdersByClientOrderId.get(order.clientOrderId);
+      if (openOrder) {
+        order.exchangeOrderId = openOrder.orderId;
+      }
+    };
+
+    for (const order of position.entryOrders) {
+      hydrateOrder(order);
+    }
+
+    for (const order of position.exitOrders) {
+      hydrateOrder(order);
+    }
+
+    if (position.stopOrder) {
+      hydrateOrder(position.stopOrder);
+    }
+  }
+
   async openPosition(signal: StrategySignal): Promise<string[]> {
     await this.assertInitialized();
     const logs: string[] = [];
@@ -406,7 +460,8 @@ export class HyperliquidLiveBroker implements Broker {
       return [`${position.symbol}: dry-run/live-disabled mode would cancel ${position.id}.`];
     }
 
-    const logs = await this.cancelExchangeOrdersForPosition(position);
+    const cancelResult = await this.cancelExchangeOrdersForPosition(position);
+    const logs = [...cancelResult.logs];
     if (position.status === "open" && position.remainingSizeUnits > POSITION_EPSILON) {
       const referencePrice = this.lastMarks.get(position.symbol) ?? position.entryReferencePrice;
       const closeClientOrderId = this.buildClientOrderId(position.id, `manual-close-${closedAt}`);
@@ -471,80 +526,95 @@ export class HyperliquidLiveBroker implements Broker {
         this.gateway.fetchFillsSince(this.accountAddress, fillStartTime, syncStartedAt),
       ]);
 
-    this.applyAccountSnapshotPricing(accountSnapshot);
-    this.openExchangeOrderIds = new Set(
-      openOrders.flatMap((order) => (order.clientOrderId ? [order.clientOrderId] : [])),
-    );
+      this.applyAccountSnapshotPricing(accountSnapshot);
+      this.openExchangeOrderIds = new Set(
+        openOrders.flatMap((order) => (order.clientOrderId ? [order.clientOrderId] : [])),
+      );
+      this.openExchangeOrderOids = new Set(openOrders.map((order) => order.orderId));
 
-    const knownOrdersByClientOrderId = new Map<
-      `0x${string}`,
-      { position: BrokerPosition; kind: "entry" | "exit" | "stop"; order: PositionEntryOrder | PositionExitOrder | PositionStopOrder }
-    >();
-    for (const position of this.openPositions.values()) {
-      for (const order of position.entryOrders) {
+      const openOrdersByClientOrderId = new Map<`0x${string}`, HyperliquidOpenOrder>();
+      for (const order of openOrders) {
         if (order.clientOrderId) {
-          knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "entry", order });
+          openOrdersByClientOrderId.set(order.clientOrderId, order);
         }
       }
 
-      for (const order of position.exitOrders) {
-        if (order.clientOrderId) {
-          knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "exit", order });
+      const knownOrdersByClientOrderId = new Map<
+        `0x${string}`,
+        { position: BrokerPosition; kind: "entry" | "exit" | "stop"; order: TrackedPositionOrder }
+      >();
+      for (const position of this.openPositions.values()) {
+        this.hydrateTrackedExchangeOrderIds(position, openOrdersByClientOrderId);
+
+        for (const order of position.entryOrders) {
+          if (order.clientOrderId) {
+            knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "entry", order });
+          }
+        }
+
+        for (const order of position.exitOrders) {
+          if (order.clientOrderId) {
+            knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "exit", order });
+          }
+        }
+
+        if (position.stopOrder?.clientOrderId) {
+          knownOrdersByClientOrderId.set(position.stopOrder.clientOrderId, {
+            position,
+            kind: "stop",
+            order: position.stopOrder,
+          });
         }
       }
 
-      if (position.stopOrder?.clientOrderId) {
-        knownOrdersByClientOrderId.set(position.stopOrder.clientOrderId, {
-          position,
-          kind: "stop",
-          order: position.stopOrder,
-        });
+      const unprocessedFills = fills
+        .filter(
+          (fill) =>
+            fill.clientOrderId &&
+            knownOrdersByClientOrderId.has(fill.clientOrderId) &&
+            !this.processedTradeIds.has(fill.tradeId),
+        )
+        .sort((left, right) => left.time - right.time || left.tradeId - right.tradeId);
+
+      for (const fill of unprocessedFills) {
+        const route = knownOrdersByClientOrderId.get(fill.clientOrderId!);
+        if (!route) {
+          continue;
+        }
+
+        if (route.kind === "entry") {
+          this.applyEntryFill(route.position, route.order as PositionEntryOrder, fill);
+        } else {
+          this.applyExitFill(
+            route.position,
+            route.order as PositionExitOrder | PositionStopOrder,
+            fill,
+            route.kind === "stop" ? "stop loss hit" : "exit order filled",
+          );
+        }
+
+        this.processedTradeIds.add(fill.tradeId);
       }
-    }
 
-    const unprocessedFills = fills
-      .filter((fill) => fill.clientOrderId && knownOrdersByClientOrderId.has(fill.clientOrderId) && !this.processedTradeIds.has(fill.tradeId))
-      .sort((left, right) => left.time - right.time || left.tradeId - right.tradeId);
+      for (const position of [...this.openPositions.values()]) {
+        this.reconcilePositionOrderStatuses(position);
 
-    for (const fill of unprocessedFills) {
-      const route = knownOrdersByClientOrderId.get(fill.clientOrderId!);
-      if (!route) {
-        continue;
-      }
+        if (position.status === "pending" && position.filledSizeUnits <= POSITION_EPSILON) {
+          const hasOpenEntryOrders = position.entryOrders.some((order) => this.isOrderOpenOnExchange(order));
+          if (!hasOpenEntryOrders) {
+            logs.push(
+              ...this.cancelPositionLocally(position, syncStartedAt, "entry ladder expired or was cancelled by the exchange"),
+            );
+          }
+        }
 
-      if (route.kind === "entry") {
-        this.applyEntryFill(route.position, route.order as PositionEntryOrder, fill);
-      } else {
-        this.applyExitFill(
-          route.position,
-          route.order as PositionExitOrder | PositionStopOrder,
-          fill,
-          route.kind === "stop" ? "stop loss hit" : "exit order filled",
-        );
-      }
-
-      this.processedTradeIds.add(fill.tradeId);
-    }
-
-    for (const position of [...this.openPositions.values()]) {
-      this.reconcilePositionOrderStatuses(position);
-
-      if (position.status === "pending" && position.filledSizeUnits <= POSITION_EPSILON) {
-        const hasOpenEntryOrders = position.entryOrders.some(
-          (order) => order.clientOrderId && this.openExchangeOrderIds.has(order.clientOrderId),
-        );
-        if (!hasOpenEntryOrders) {
-          logs.push(...this.cancelPositionLocally(position, syncStartedAt, "entry ladder expired or was cancelled by the exchange"));
+        if (position.status === "open" && position.remainingSizeUnits <= POSITION_EPSILON) {
+          logs.push(...this.finishPosition(position, syncStartedAt, position.closeReason ?? "position fully exited"));
         }
       }
 
-      if (position.status === "open" && position.remainingSizeUnits <= POSITION_EPSILON) {
-        logs.push(...this.finishPosition(position, syncStartedAt, position.closeReason ?? "position fully exited"));
-      }
-    }
-
-    this.lastSyncTime = syncStartedAt;
-    this.trimProcessedTradeIds();
+      this.lastSyncTime = syncStartedAt;
+      this.trimProcessedTradeIds();
       logs.push(...(await this.ensureProtectiveOrders()));
       await this.recordEquity(Object.fromEntries(this.lastMarks.entries()));
       await this.saveState();
@@ -630,7 +700,7 @@ export class HyperliquidLiveBroker implements Broker {
 
   private reconcilePositionOrderStatuses(position: BrokerPosition): void {
     for (const order of position.entryOrders) {
-      const isOpenOnExchange = order.clientOrderId ? this.openExchangeOrderIds.has(order.clientOrderId) : false;
+      const isOpenOnExchange = this.isOrderOpenOnExchange(order);
       if (isOpenOnExchange) {
         order.status = "pending";
         continue;
@@ -652,7 +722,7 @@ export class HyperliquidLiveBroker implements Broker {
     }
 
     for (const order of position.exitOrders) {
-      const isOpenOnExchange = order.clientOrderId ? this.openExchangeOrderIds.has(order.clientOrderId) : false;
+      const isOpenOnExchange = this.isOrderOpenOnExchange(order);
       if (isOpenOnExchange) {
         order.status = "pending";
         continue;
@@ -674,8 +744,7 @@ export class HyperliquidLiveBroker implements Broker {
     }
 
     if (position.stopOrder) {
-      const isOpenOnExchange =
-        position.stopOrder.clientOrderId !== undefined && this.openExchangeOrderIds.has(position.stopOrder.clientOrderId);
+      const isOpenOnExchange = this.isOrderOpenOnExchange(position.stopOrder);
       if (isOpenOnExchange) {
         position.stopOrder.status = "pending";
       } else if ((position.stopOrder.filledSizeUnits ?? 0) >= position.stopOrder.sizeUnits - POSITION_EPSILON) {
@@ -705,7 +774,10 @@ export class HyperliquidLiveBroker implements Broker {
 
   private async ensureProtectiveOrdersForPosition(position: BrokerPosition): Promise<string[]> {
     const logs: string[] = [];
-    const protectiveOrderSpecs: HyperliquidPlaceOrderSpec[] = [];
+    const protectivePlacements: Array<{
+      order: PositionExitOrder | PositionStopOrder;
+      spec: HyperliquidPlaceOrderSpec;
+    }> = [];
     const assetInfo = this.gateway.getAssetInfo(position.symbol);
 
     const desiredStop = {
@@ -725,30 +797,56 @@ export class HyperliquidLiveBroker implements Broker {
       !isSameNumber(position.stopOrder.price, desiredStop.price) ||
       !isSameNumber(position.stopOrder.sizeUnits, desiredStop.sizeUnits) ||
       !position.stopOrder.clientOrderId ||
-      !this.openExchangeOrderIds.has(position.stopOrder.clientOrderId);
+      !this.isOrderOpenOnExchange(position.stopOrder);
 
     if (stopNeedsReplace) {
-      logs.push(...(await this.cancelExchangeOrdersForPosition(position, { stopOnly: true })));
-      const clientOrderId = this.buildClientOrderId(position.id, "stop");
-      position.stopOrder = {
-        price: desiredStop.price,
-        sizeUnits: desiredStop.sizeUnits,
-        status: "pending",
-        clientOrderId,
-      };
-      protectiveOrderSpecs.push({
-        symbol: position.symbol,
-        side: oppositeTradeSide(position.side),
-        price: this.applySlippage(oppositeTradeSide(position.side), position.stopLoss),
-        sizeUnits: desiredStop.sizeUnits,
-        reduceOnly: true,
-        clientOrderId,
-        trigger: {
-          isMarket: true,
-          triggerPx: position.stopLoss,
-          tpsl: "sl",
-        },
-      });
+      const currentStopOrder = position.stopOrder;
+      const hasExistingStopHandle =
+        currentStopOrder.clientOrderId !== undefined || currentStopOrder.exchangeOrderId !== undefined;
+      let canReplaceStop = true;
+
+      if (hasExistingStopHandle) {
+        const cancelResult = await this.cancelExchangeOrdersForPosition(position, { stopOnly: true });
+        logs.push(...cancelResult.logs);
+        const stopCancelFailed = cancelResult.trackedResults.some(
+          (tracked) => tracked.order === currentStopOrder && tracked.result.status === "error",
+        );
+        if (stopCancelFailed) {
+          logs.push(
+            `${position.symbol}: skipped stop-loss replacement for ${position.id} because the previous stop order could not be cancelled.`,
+          );
+          canReplaceStop = false;
+        }
+      }
+
+      if (canReplaceStop) {
+        const clientOrderId = this.buildProtectiveClientOrderId(
+          position.id,
+          `stop-${desiredStop.sizeUnits.toFixed(8)}-${desiredStop.price.toFixed(8)}`,
+        );
+        position.stopOrder = {
+          price: desiredStop.price,
+          sizeUnits: desiredStop.sizeUnits,
+          status: "pending",
+          clientOrderId,
+        };
+        protectivePlacements.push({
+          order: position.stopOrder,
+          spec: {
+            symbol: position.symbol,
+            side: oppositeTradeSide(position.side),
+            price: this.applySlippage(oppositeTradeSide(position.side), position.stopLoss),
+            sizeUnits: desiredStop.sizeUnits,
+            reduceOnly: true,
+            clientOrderId,
+            trigger: {
+              isMarket: true,
+              triggerPx: position.stopLoss,
+              tpsl: "sl",
+            },
+          },
+        });
+      }
     }
 
     const desiredExitSizeUnits = allocatePrioritizedExitOrderTargets({
@@ -762,15 +860,25 @@ export class HyperliquidLiveBroker implements Broker {
       const desiredTotalSizeUnits = desiredExitSizeUnits[index] ?? 0;
       const desiredOpenSizeUnits = Math.max(0, desiredTotalSizeUnits - (order.filledSizeUnits ?? 0));
       const currentOutstandingSizeUnits = Math.max(0, order.sizeUnits - (order.filledSizeUnits ?? 0));
-      const orderIsOpen = order.clientOrderId ? this.openExchangeOrderIds.has(order.clientOrderId) : false;
+      const orderIsOpen = this.isOrderOpenOnExchange(order);
 
       if (desiredOpenSizeUnits <= POSITION_EPSILON) {
         if (orderIsOpen) {
-          logs.push(...(await this.cancelExchangeOrdersForPosition(position, { exitOrderIndexes: [index] })));
+          const cancelResult = await this.cancelExchangeOrdersForPosition(position, { exitOrderIndexes: [index] });
+          logs.push(...cancelResult.logs);
+          const cancelFailed = cancelResult.trackedResults.some(
+            (tracked) => tracked.order === order && tracked.result.status === "error",
+          );
+          if (cancelFailed) {
+            logs.push(
+              `${position.symbol}: kept ${order.label} for ${position.id} because the exchange did not confirm the cancel.`,
+            );
+            continue;
+          }
         }
 
         order.sizeUnits = desiredTotalSizeUnits;
-        order.status = (order.filledSizeUnits ?? 0) > POSITION_EPSILON ? "filled" : "cancelled";
+        order.status = resolveCancelledOrderStatus(order);
         continue;
       }
 
@@ -784,28 +892,57 @@ export class HyperliquidLiveBroker implements Broker {
         continue;
       }
 
-      logs.push(...(await this.cancelExchangeOrdersForPosition(position, { exitOrderIndexes: [index] })));
+      const hasExistingOrderHandle = order.clientOrderId !== undefined || order.exchangeOrderId !== undefined;
+      if (hasExistingOrderHandle) {
+        const cancelResult = await this.cancelExchangeOrdersForPosition(position, { exitOrderIndexes: [index] });
+        logs.push(...cancelResult.logs);
+        const cancelFailed = cancelResult.trackedResults.some(
+          (tracked) => tracked.order === order && tracked.result.status === "error",
+        );
+        if (cancelFailed) {
+          logs.push(
+            `${position.symbol}: skipped take-profit replacement for ${position.id} (${order.label}) because the previous order could not be cancelled.`,
+          );
+          continue;
+        }
+      }
+
       order.sizeUnits = desiredTotalSizeUnits;
       order.status = "pending";
-      const clientOrderId = this.buildClientOrderId(position.id, `tp-${index}-${position.filledSizeUnits.toFixed(8)}`);
+      delete order.exchangeOrderId;
+      const clientOrderId = this.buildProtectiveClientOrderId(
+        position.id,
+        `tp-${index}-${desiredOpenSizeUnits.toFixed(8)}-${order.price.toFixed(8)}`,
+      );
       order.clientOrderId = clientOrderId;
-      protectiveOrderSpecs.push({
-        symbol: position.symbol,
-        side: oppositeTradeSide(position.side),
-        price: order.price,
-        sizeUnits: desiredOpenSizeUnits,
-        reduceOnly: true,
-        tif: "Gtc",
-        clientOrderId,
+      protectivePlacements.push({
+        order,
+        spec: {
+          symbol: position.symbol,
+          side: oppositeTradeSide(position.side),
+          price: order.price,
+          sizeUnits: desiredOpenSizeUnits,
+          reduceOnly: true,
+          tif: "Gtc",
+          clientOrderId,
+        },
       });
     }
 
-    if (protectiveOrderSpecs.length === 0) {
+    if (protectivePlacements.length === 0) {
       return logs;
     }
 
-    const results = await this.gateway.placeOrders(protectiveOrderSpecs);
-    for (const result of results) {
+    const results = await this.gateway.placeOrders(protectivePlacements.map((placement) => placement.spec));
+    for (const [index, result] of results.entries()) {
+      const placement = protectivePlacements[index];
+      if (!placement) {
+        continue;
+      }
+
+      if (result.orderId !== undefined) {
+        placement.order.exchangeOrderId = result.orderId;
+      }
       logs.push(`${position.symbol}: submitted protective order ${result.clientOrderId ?? "unknown"} (${result.status}).`);
     }
 
@@ -828,7 +965,8 @@ export class HyperliquidLiveBroker implements Broker {
     }
 
     for (const position of oppositePositions) {
-      logs.push(...(await this.cancelExchangeOrdersForPosition(position)));
+      const cancelResult = await this.cancelExchangeOrdersForPosition(position);
+      logs.push(...cancelResult.logs);
 
       if (position.status === "pending" || position.remainingSizeUnits <= POSITION_EPSILON) {
         logs.push(...this.cancelPositionLocally(position, signal.generatedAt, `cancelled before ${signal.side} flip entry`));
@@ -860,20 +998,48 @@ export class HyperliquidLiveBroker implements Broker {
   private async cancelExchangeOrdersForPosition(
     position: BrokerPosition,
     options: { stopOnly?: boolean; exitOrderIndexes?: number[] } = {},
-  ): Promise<string[]> {
+  ): Promise<CancelExchangeOrdersResult> {
     if (!this.writesEnabled()) {
-      return [];
+      return { logs: [], trackedResults: [] };
     }
 
-    const requests: Array<{ symbol: string; clientOrderId: `0x${string}` }> = [];
+    const trackedRequests: Array<{
+      request: HyperliquidCancelOrderRequest;
+      order: TrackedPositionOrder;
+    }> = [];
     const logs: string[] = [];
+    const queueCancel = (
+      order: TrackedPositionOrder,
+      options: {
+        allowWithoutOpenExchangeMatch?: boolean;
+      } = {},
+    ): void => {
+      const hasTrackedHandle = order.clientOrderId !== undefined || order.exchangeOrderId !== undefined;
+      if (!hasTrackedHandle) {
+        return;
+      }
+
+      if (!options.allowWithoutOpenExchangeMatch && !this.isOrderOpenOnExchange(order)) {
+        return;
+      }
+
+      if (trackedRequests.some((tracked) => tracked.order === order)) {
+        return;
+      }
+
+      trackedRequests.push({
+        request: {
+          symbol: position.symbol,
+          ...(order.exchangeOrderId !== undefined ? { orderId: order.exchangeOrderId } : {}),
+          ...(order.clientOrderId !== undefined ? { clientOrderId: order.clientOrderId } : {}),
+        },
+        order,
+      });
+    };
 
     if (!options.stopOnly && options.exitOrderIndexes === undefined) {
       for (const order of position.entryOrders) {
-        if (order.clientOrderId && this.openExchangeOrderIds.has(order.clientOrderId)) {
-          requests.push({ symbol: position.symbol, clientOrderId: order.clientOrderId });
-          order.status = "cancelled";
-        }
+        queueCancel(order);
       }
     }
 
@@ -883,37 +1049,70 @@ export class HyperliquidLiveBroker implements Broker {
         ? position.exitOrders.map((order, index) => ({ order, index }))
         : options.exitOrderIndexes.map((index) => ({ order: position.exitOrders[index]!, index }));
     for (const { order } of exitOrders) {
-      if (!order?.clientOrderId || !this.openExchangeOrderIds.has(order.clientOrderId)) {
+      if (!order) {
         continue;
       }
 
-      requests.push({ symbol: position.symbol, clientOrderId: order.clientOrderId });
-      order.status = "cancelled";
+      queueCancel(order);
     }
 
     // Always try cancel-by-cloid when we have a stored id. Relying on `openExchangeOrderIds` alone
     // misses live trigger orders if the info API omits `cloid` on some rows — then we would place a
     // replacement SL without cancelling the old one (duplicate stops on partial ladder fills).
-    if (position.stopOrder?.clientOrderId && (options.exitOrderIndexes === undefined || options.stopOnly)) {
-      requests.push({ symbol: position.symbol, clientOrderId: position.stopOrder.clientOrderId });
-      position.stopOrder.status = "cancelled";
+    if (position.stopOrder && (options.exitOrderIndexes === undefined || options.stopOnly)) {
+      queueCancel(position.stopOrder, { allowWithoutOpenExchangeMatch: true });
     }
 
-    if (requests.length === 0) {
-      return logs;
+    if (trackedRequests.length === 0) {
+      return { logs, trackedResults: [] };
     }
 
     try {
-      await this.gateway.cancelOrdersByCloid(requests);
-      for (const request of requests) {
-        this.openExchangeOrderIds.delete(request.clientOrderId);
-      }
-      logs.push(`${position.symbol}: cancelled ${requests.length} exchange order(s) for ${position.id}.`);
-    } catch (error) {
-      logs.push(`${position.symbol}: failed to cancel one or more exchange orders for ${position.id}: ${String(error)}.`);
-    }
+      const cancelResults = await this.gateway.cancelOrders(trackedRequests.map((tracked) => tracked.request));
+      const trackedResults = trackedRequests.map((tracked, index) => ({
+        ...tracked,
+        result: cancelResults[index]!,
+      }));
 
-    return logs;
+      let successCount = 0;
+      for (const tracked of trackedResults) {
+        if (tracked.result.status === "success") {
+          successCount += 1;
+          if (tracked.request.clientOrderId) {
+            this.openExchangeOrderIds.delete(tracked.request.clientOrderId);
+          }
+          if (tracked.request.orderId !== undefined) {
+            this.openExchangeOrderOids.delete(tracked.request.orderId);
+          }
+          tracked.order.status = resolveCancelledOrderStatus(tracked.order);
+          continue;
+        }
+
+        logs.push(
+          `${position.symbol}: failed to cancel ${this.describeExchangeOrderHandle(tracked.request)} for ${position.id}: ${tracked.result.error ?? "unknown exchange error"}.`,
+        );
+      }
+
+      if (successCount > 0) {
+        logs.push(`${position.symbol}: cancelled ${successCount} exchange order(s) for ${position.id}.`);
+      }
+
+      return { logs, trackedResults };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logs.push(`${position.symbol}: failed to cancel one or more exchange orders for ${position.id}: ${message}.`);
+      return {
+        logs,
+        trackedResults: trackedRequests.map((tracked) => ({
+          ...tracked,
+          result: {
+            ...tracked.request,
+            status: "error",
+            error: message,
+          },
+        })),
+      };
+    }
   }
 
   private finishPosition(position: BrokerPosition, closedAt: number, closeReason: string): string[] {
@@ -984,6 +1183,22 @@ export class HyperliquidLiveBroker implements Broker {
 
   private buildClientOrderId(positionId: string, suffix: string): `0x${string}` {
     return toClientOrderId(`${positionId}:${suffix}`);
+  }
+
+  private buildProtectiveClientOrderId(positionId: string, suffix: string): `0x${string}` {
+    return toClientOrderId(`${positionId}:${suffix}:${Date.now()}:${this.nextProtectiveOrderSequence++}`);
+  }
+
+  private describeExchangeOrderHandle(request: HyperliquidCancelOrderRequest): string {
+    if (request.orderId !== undefined && request.clientOrderId !== undefined) {
+      return `order oid=${request.orderId} cloid=${request.clientOrderId}`;
+    }
+
+    if (request.orderId !== undefined) {
+      return `order oid=${request.orderId}`;
+    }
+
+    return `order cloid=${request.clientOrderId ?? "unknown"}`;
   }
 
   private getEarliestTrackedSignalTime(): number {
