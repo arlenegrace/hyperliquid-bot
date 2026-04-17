@@ -73,8 +73,8 @@ test("allocateEntryOrderSizeUnits gives remainder steps to highest-priced long l
   const prices = [94.058, 93.661, 93.263, 92.865, 92.468];
   const sizes = allocateEntryOrderSizeUnits({
     positionSizeUsd: 120,
-    entryReferencePrice: 93.5,
     orderPrices: prices,
+    orderSizeFractions: prices.map(() => 0.2),
     szDecimals: 2,
     side: "long",
   });
@@ -86,13 +86,36 @@ test("allocateEntryOrderSizeUnits gives remainder steps to lowest-priced short l
   const prices = [92.468, 92.865, 93.263, 93.661, 94.058];
   const sizes = allocateEntryOrderSizeUnits({
     positionSizeUsd: 120,
-    entryReferencePrice: 93.5,
     orderPrices: prices,
+    orderSizeFractions: prices.map(() => 0.2),
     szDecimals: 2,
     side: "short",
   });
 
   assert.deepEqual(sizes, [0.26, 0.26, 0.26, 0.25, 0.25]);
+});
+
+test("buildPlannedEntryOrders keeps short ladder notional under the configured USD size cap", () => {
+  const signal = createSignal({
+    side: "short",
+    maxRiskUsd: undefined,
+    entryReferencePrice: 89.03,
+    positionSizeUsd: 200,
+    entryOrders: [
+      { label: "Entry 1", price: 89.03, sizeFraction: 0.2 },
+      { label: "Entry 2", price: 89.2, sizeFraction: 0.2 },
+      { label: "Entry 3", price: 89.37, sizeFraction: 0.2 },
+      { label: "Entry 4", price: 89.54, sizeFraction: 0.2 },
+      { label: "Entry 5", price: 89.71, sizeFraction: 0.2 },
+    ],
+  });
+  const orders = buildPlannedEntryOrders(signal, 200, { szDecimals: 2 });
+
+  assert.deepEqual(
+    orders.map((order) => order.sizeUnits),
+    [0.45, 0.45, 0.45, 0.44, 0.44],
+  );
+  assert.ok(calculatePlannedEntryNotionalUsd(orders) <= 200);
 });
 
 test("allocatePrioritizedExitOrderTargets keeps five fractional take-profit orders when precision allows", () => {

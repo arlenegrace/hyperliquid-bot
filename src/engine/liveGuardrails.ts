@@ -2,58 +2,80 @@ import type { PositionEntryOrder, StrategySignal, TradeSide } from "../types.js"
 
 const POSITION_EPSILON = 1e-9;
 
-/** When set, entry sizes are rounded to the exchange step size; leftover steps go to orders farthest from the opposite range edge (long: highest price first, short: lowest price first). */
+/** When set, entry sizes are rounded to the exchange step size; leftover steps go to the highest-remainder orders, with price priority used as a tie-breaker (long: highest price first, short: lowest price first). */
 export interface EntrySizeAllocationOptions {
   szDecimals: number;
 }
 
 /**
- * Splits total coin budget (positionSizeUsd / entryReferencePrice) across n orders in equal base steps,
- * then assigns any remainder steps to the highest-priority orders (long: highest limit price first;
- * short: lowest limit price first) so total size approaches the env budget without falling short from
- * independent per-order flooring.
+ * Splits the USD budget across ladder orders using their weighted average limit price, floors each
+ * order independently to the exchange step size, then adds back any affordable remainder steps in a
+ * stable priority order so the final ladder never exceeds the USD budget.
  */
 export function allocateEntryOrderSizeUnits({
   positionSizeUsd,
-  entryReferencePrice,
   orderPrices,
+  orderSizeFractions,
   szDecimals,
   side,
 }: {
   positionSizeUsd: number;
-  entryReferencePrice: number;
   orderPrices: number[];
+  orderSizeFractions: number[];
   szDecimals: number;
   side: TradeSide;
 }): number[] {
   const n = orderPrices.length;
-  if (n === 0) {
+  if (n === 0 || positionSizeUsd <= POSITION_EPSILON) {
     return [];
   }
 
   const quantum = 10 ** -szDecimals;
-  const totalUnits = positionSizeUsd / entryReferencePrice;
-  const totalSteps = Math.floor(totalUnits / quantum + POSITION_EPSILON);
-  if (totalSteps <= 0) {
+  const rawWeights = orderSizeFractions.map((fraction) => Math.max(0, fraction));
+  const totalWeight = rawWeights.reduce((sum, weight) => sum + weight, 0);
+  const normalizedWeights =
+    totalWeight > POSITION_EPSILON ? rawWeights.map((weight) => weight / totalWeight) : orderPrices.map(() => 1 / n);
+  const weightedAveragePrice = orderPrices.reduce(
+    (sum, price, index) => sum + price * (normalizedWeights[index] ?? 0),
+    0,
+  );
+  if (weightedAveragePrice <= POSITION_EPSILON) {
     return orderPrices.map(() => 0);
   }
 
-  const basePerOrder = Math.floor(totalSteps / n);
-  const remainder = totalSteps - basePerOrder * n;
+  const idealSteps = normalizedWeights.map((weight) => (positionSizeUsd * weight) / (weightedAveragePrice * quantum));
+  const steps = idealSteps.map((ideal) => Math.floor(ideal + POSITION_EPSILON));
+  let plannedNotionalUsd = steps.reduce(
+    (sum, sizeSteps, index) => sum + sizeSteps * quantum * (orderPrices[index] ?? 0),
+    0,
+  );
 
   const priorityIndices = orderPrices.map((_, index) => index);
-  if (side === "long") {
-    priorityIndices.sort((a, b) => (orderPrices[b] ?? 0) - (orderPrices[a] ?? 0));
-  } else {
-    priorityIndices.sort((a, b) => (orderPrices[a] ?? 0) - (orderPrices[b] ?? 0));
-  }
-
-  const steps = new Array<number>(n).fill(basePerOrder);
-  for (let k = 0; k < remainder; k++) {
-    const idx = priorityIndices[k];
-    if (idx !== undefined) {
-      steps[idx] += 1;
+  priorityIndices.sort((left, right) => {
+    const remainderDelta =
+      (idealSteps[right] ?? 0) - Math.floor((idealSteps[right] ?? 0) + POSITION_EPSILON) -
+      ((idealSteps[left] ?? 0) - Math.floor((idealSteps[left] ?? 0) + POSITION_EPSILON));
+    if (Math.abs(remainderDelta) > POSITION_EPSILON) {
+      return remainderDelta;
     }
+
+    return side === "long"
+      ? (orderPrices[right] ?? 0) - (orderPrices[left] ?? 0)
+      : (orderPrices[left] ?? 0) - (orderPrices[right] ?? 0);
+  });
+
+  for (const index of priorityIndices) {
+    const stepNotionalUsd = (orderPrices[index] ?? 0) * quantum;
+    if (stepNotionalUsd <= POSITION_EPSILON) {
+      continue;
+    }
+
+    if (plannedNotionalUsd + stepNotionalUsd > positionSizeUsd + POSITION_EPSILON) {
+      continue;
+    }
+
+    steps[index] += 1;
+    plannedNotionalUsd += stepNotionalUsd;
   }
 
   return steps.map((s) => s * quantum);
@@ -92,10 +114,11 @@ export function buildPlannedEntryOrders(
 
   if (allocation !== undefined) {
     const orderPrices = signal.entryOrders.map((order) => order.price);
+    const orderSizeFractions = signal.entryOrders.map((order) => order.sizeFraction ?? order.riskFraction ?? 0);
     const sizeUnitsList = allocateEntryOrderSizeUnits({
       positionSizeUsd,
-      entryReferencePrice: signal.entryReferencePrice,
       orderPrices,
+      orderSizeFractions,
       szDecimals: allocation.szDecimals,
       side: signal.side,
     });
