@@ -400,6 +400,11 @@ async function main(): Promise<void> {
     "manual-range-trading-v2",
     symbols,
   );
+  printFilledTradeDetectionsForStrategy(
+    results.find((result) => result.summary.strategyId === "manual-range-trading-v3"),
+    "manual-range-trading-v3",
+    symbols,
+  );
 
   const winner = rankedResults[0];
   if (winner) {

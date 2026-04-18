@@ -6,7 +6,10 @@ export type OrderStatus = "pending" | "filled" | "cancelled";
 export type ExecutionMode = "paper" | "live";
 export type MarginMode = "cross" | "isolated";
 export type LeverageSetting = number | "max";
-export type ActiveStrategyId = "manual-range-trading-v1" | "manual-range-trading-v2";
+export type ActiveStrategyId =
+  | "manual-range-trading-v1"
+  | "manual-range-trading-v2"
+  | "manual-range-trading-v3";
 export type ManualRangeSetupKind = "initial-reclaim" | "edge-reentry";
 export type StrategyEntryMode = "standard" | "flip";
 export type SignalMetadataValue = string | number | boolean | undefined;

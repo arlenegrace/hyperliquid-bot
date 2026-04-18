@@ -44,7 +44,7 @@ const envSchema = z.object({
   POLL_INTERVAL_MS: z.coerce.number().int().min(5_000).default(30_000),
   EXECUTION_MODE: z.enum(["paper", "live"]).default("paper"),
   ACTIVE_STRATEGY: z
-    .enum(["manual-range-trading-v1", "manual-range-trading-v2"])
+    .enum(["manual-range-trading-v1", "manual-range-trading-v2", "manual-range-trading-v3"])
     .default("manual-range-trading-v1")
     .transform((value) => value as ActiveStrategyId),
   RANGE_LOOKBACK_CANDLES: z.coerce.number().int().min(5).max(5_000).default(500),

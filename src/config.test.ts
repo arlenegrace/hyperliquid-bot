@@ -81,6 +81,21 @@ test("loadConfig parses live trading flags and limits", () => {
   );
 });
 
+test("loadConfig parses ACTIVE_STRATEGY manual-range-trading-v3", () => {
+  withEnv(
+    {
+      EXECUTION_MODE: "live",
+      ACTIVE_STRATEGY: "manual-range-trading-v3",
+      HL_PRIVATE_KEY: LIVE_PRIVATE_KEY,
+      HL_ACCOUNT_ADDRESS: LIVE_ACCOUNT_ADDRESS,
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.activeStrategyId, "manual-range-trading-v3");
+    },
+  );
+});
+
 test("loadConfig accepts max leverage and keeps cross margin by default", () => {
   withEnv(
     {

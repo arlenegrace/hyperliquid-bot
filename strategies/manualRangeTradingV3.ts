@@ -1,4 +1,8 @@
-import { findLatestReclaimEvent } from "../src/analysis/rangeResearch.js";
+import {
+  excursionExtremeForStop,
+  findLastCloseInsideRangeIndex,
+  findLatestReclaimEvent,
+} from "../src/analysis/rangeResearch.js";
 import { wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import type {
@@ -10,10 +14,10 @@ import { buildRangeEntryOrders, buildRangeExitOrders } from "./ladderUtils.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
-export class ManualRangeTradingV1Strategy implements TradingStrategy {
-  readonly id = "manual-range-trading-v1";
+export class ManualRangeTradingV3Strategy implements TradingStrategy {
+  readonly id = "manual-range-trading-v3";
   readonly description =
-    "Recreates the original manual range strategy: close-based deviation and reclaim, equal ladder entries near the edge, and equal ladder exits across the range.";
+    "Like manual range v1, but stop loss uses the excursion extreme (min low / max high) since the last close inside the range, not only the reclaim deviation candle.";
 
   evaluate(context: StrategyContext): StrategyResult {
     if (!context.manualRange) {
@@ -33,7 +37,7 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
     if (context.hasOpenPosition) {
       return {
         notes: [
-          `${context.symbol}: skipped ${this.id} because a position or ladder plan is already active; v1 only re-arms after the current net position is fully flat.`,
+          `${context.symbol}: skipped ${this.id} because a position or ladder plan is already active; v3 only re-arms after the current net position is fully flat.`,
         ],
       };
     }
@@ -62,6 +66,15 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
       };
     }
 
+    const signalIndex = activeCandles.length - 1;
+    const lastInsideIdx = findLastCloseInsideRangeIndex(activeCandles, range, signalIndex);
+    const stopAnchor = excursionExtremeForStop(
+      reclaimEvent.side,
+      activeCandles,
+      lastInsideIdx,
+      signalIndex,
+      reclaimEvent.deviationCandle,
+    );
     const entryBandWidth = range.width * context.config.ladderEntryBandPct;
 
     if (reclaimEvent.side === "long") {
@@ -71,21 +84,21 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: manual v1 long reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: manual v3 long reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} (excursion-based stop).`,
         ],
         signal: {
           strategyId: this.id,
           symbol: context.symbol,
           side: "long",
           entryReferencePrice: signalCandle.close,
-          stopLoss: reclaimEvent.deviationCandle.low * (1 - context.config.stopBufferPct),
+          stopLoss: stopAnchor * (1 - context.config.stopBufferPct),
           entryOrders: buildRangeEntryOrders("long", range.low, upperEntry, context.config.ladderLevels),
           exitOrders: buildRangeExitOrders("long", exitStart, exitEnd, context.config.ladderLevels),
           range,
           triggerCandle: signalCandle,
           deviationCandle: reclaimEvent.deviationCandle,
           reason:
-            "Original manual range logic: a 4h close deviated below the range and a later closed 4h candle reclaimed back inside it.",
+            "Manual range v3: same reclaim as v1, but stop uses the lowest low since the last close inside the range (excursion), with buffer.",
           generatedAt: signalCandle.closeTime,
           expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
           positionSizeUsd: context.config.positionSizeUsd,
@@ -99,21 +112,21 @@ export class ManualRangeTradingV1Strategy implements TradingStrategy {
 
     return {
       notes: [
-        `${context.symbol}: manual v1 short reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+        `${context.symbol}: manual v3 short reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} (excursion-based stop).`,
       ],
       signal: {
         strategyId: this.id,
         symbol: context.symbol,
         side: "short",
         entryReferencePrice: signalCandle.close,
-        stopLoss: reclaimEvent.deviationCandle.high * (1 + context.config.stopBufferPct),
+        stopLoss: stopAnchor * (1 + context.config.stopBufferPct),
         entryOrders: buildRangeEntryOrders("short", lowerEntry, range.high, context.config.ladderLevels),
         exitOrders: buildRangeExitOrders("short", exitStart, exitEnd, context.config.ladderLevels),
         range,
         triggerCandle: signalCandle,
         deviationCandle: reclaimEvent.deviationCandle,
         reason:
-          "Original manual range logic: a 4h close deviated above the range and a later closed 4h candle reclaimed back inside it.",
+          "Manual range v3: same reclaim as v1, but stop uses the highest high since the last close inside the range (excursion), with buffer.",
         generatedAt: signalCandle.closeTime,
         expiryTime: signalCandle.closeTime + context.config.signalExpiryCandles * FOUR_HOURS_MS,
         positionSizeUsd: context.config.positionSizeUsd,

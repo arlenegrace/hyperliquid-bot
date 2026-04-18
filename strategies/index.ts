@@ -3,6 +3,7 @@ import { AnchoredRangeLadderStrategy } from "./anchoredRangeLadder.js";
 import { ManualRangeTradingStrategy } from "./manualRangeTrading.js";
 import { ManualRangeTradingV1Strategy } from "./manualRangeTradingV1.js";
 import { ManualRangeTradingV2Strategy } from "./manualRangeTradingV2.js";
+import { ManualRangeTradingV3Strategy } from "./manualRangeTradingV3.js";
 import { PivotClusterMeanReversionStrategy } from "./pivotClusterMeanReversion.js";
 
 export function createAllStrategies(): TradingStrategy[] {
@@ -10,6 +11,7 @@ export function createAllStrategies(): TradingStrategy[] {
     new ManualRangeTradingStrategy(),
     new ManualRangeTradingV1Strategy(),
     new ManualRangeTradingV2Strategy(),
+    new ManualRangeTradingV3Strategy(),
     new AnchoredRangeLadderStrategy(),
     new PivotClusterMeanReversionStrategy(),
   ];
@@ -21,5 +23,7 @@ export function createStrategies(activeStrategyId: ActiveStrategyId): TradingStr
       return [new ManualRangeTradingV1Strategy()];
     case "manual-range-trading-v2":
       return [new ManualRangeTradingV2Strategy()];
+    case "manual-range-trading-v3":
+      return [new ManualRangeTradingV3Strategy()];
   }
 }

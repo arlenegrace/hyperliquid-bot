@@ -336,6 +336,54 @@ export function findLatestReclaimEvent(
   return undefined;
 }
 
+/** Last index strictly before `beforeIndex` whose close is inside `[range.low, range.high]`, or -1. */
+export function findLastCloseInsideRangeIndex(
+  candles: Candle[],
+  range: RangeSnapshot,
+  beforeIndex: number,
+): number {
+  return findLastMatchingIndex(candles, (candle, index) => {
+    return index < beforeIndex && candle.close >= range.low && candle.close <= range.high;
+  });
+}
+
+/**
+ * Min low (long) or max high (short) across excursion candles from `lastInsideIdx + 1` through `throughIndex` inclusive.
+ * If `lastInsideIdx < 0` or the window is empty, uses the deviation candle's low/high.
+ */
+export function excursionExtremeForStop(
+  side: TradeSide,
+  candles: Candle[],
+  lastInsideIdx: number,
+  throughIndex: number,
+  deviationCandle: Candle,
+): number {
+  const start = lastInsideIdx + 1;
+  if (lastInsideIdx < 0 || start > throughIndex) {
+    return side === "long" ? deviationCandle.low : deviationCandle.high;
+  }
+
+  if (side === "long") {
+    let minLow = Number.POSITIVE_INFINITY;
+    for (let i = start; i <= throughIndex; i += 1) {
+      const candle = candles[i];
+      if (candle) {
+        minLow = Math.min(minLow, candle.low);
+      }
+    }
+    return minLow;
+  }
+
+  let maxHigh = Number.NEGATIVE_INFINITY;
+  for (let i = start; i <= throughIndex; i += 1) {
+    const candle = candles[i];
+    if (candle) {
+      maxHigh = Math.max(maxHigh, candle.high);
+    }
+  }
+  return maxHigh;
+}
+
 function findNearestCandle(candles: Candle[], timestamp: number): Candle | undefined {
   let nearestCandle: Candle | undefined;
   let nearestDistance = Number.POSITIVE_INFINITY;
