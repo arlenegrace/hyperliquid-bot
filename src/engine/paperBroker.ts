@@ -287,12 +287,15 @@ export class PaperBroker implements Broker {
       return sum + calculatePnlUsd(position.side, position.averageEntryPrice, markPrice, position.remainingSizeUnits);
     }, 0);
 
+    const equityUsd = this.startingBalanceUsd + this.realizedPnlUsd + unrealizedPnlUsd;
+
     return {
       startingBalanceUsd: this.startingBalanceUsd,
       realizedPnlUsd: this.realizedPnlUsd,
       lifetimeFundingUsd: 0,
       unrealizedPnlUsd,
-      equityUsd: this.startingBalanceUsd + this.realizedPnlUsd + unrealizedPnlUsd,
+      allTimePnlUsd: equityUsd - this.startingBalanceUsd,
+      equityUsd,
       maxDrawdownPct: this.maxDrawdownPct,
       grossProfitUsd: this.grossProfitUsd,
       grossLossUsd: this.grossLossUsd,

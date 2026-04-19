@@ -8,6 +8,24 @@ export function wrapOrange(text: string): string {
   return `${ANSI_ORANGE}${text}${ANSI_RESET}`;
 }
 
+export function wrapRed(text: string): string {
+  return `${ANSI_RED}${text}${ANSI_RESET}`;
+}
+
+/**
+ * Like signed PnL color rules, with a `$` after the sign, e.g. `+$12.34 USD` or `+$12.34`.
+ */
+export function formatSignedUsdWithDollarPrefixColored(usd: number, options: { suffix: string }): string {
+  const text =
+    usd >= 0
+      ? `+$${usd.toFixed(2)}${options.suffix}`
+      : `-$${Math.abs(usd).toFixed(2)}${options.suffix}`;
+  if (usd < 0) {
+    return `${ANSI_RED}${text}${ANSI_RESET}`;
+  }
+  return `${ANSI_GREEN}${text}${ANSI_RESET}`;
+}
+
 /** Green for zero or profit, red for losses. */
 export function formatRealizedPnlUsdColored(usd: number): string {
   const text = `${usd.toFixed(2)} USD`;

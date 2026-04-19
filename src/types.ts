@@ -295,6 +295,11 @@ export interface BrokerSnapshot {
    */
   lifetimeFundingUsd: number;
   unrealizedPnlUsd: number;
+  /**
+   * Live: latest cumulative PnL from Hyperliquid `portfolio` (`allTime` `pnlHistory`), aligned with the UI.
+   * Paper: `equityUsd - startingBalanceUsd` for the session.
+   */
+  allTimePnlUsd: number;
   equityUsd: number;
   maxDrawdownPct: number;
   grossProfitUsd: number;

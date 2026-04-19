@@ -272,6 +272,27 @@ export class HyperliquidExchangeGateway {
     return total;
   }
 
+  /**
+   * Latest all-time cumulative PnL from the official portfolio API (same series as the Hyperliquid UI).
+   */
+  async fetchPortfolioAllTimePnlUsd(accountAddress: `0x${string}`): Promise<number> {
+    const rows = await this.infoClient.portfolio({ user: accountAddress });
+    for (const [period, data] of rows) {
+      if (period !== "allTime") {
+        continue;
+      }
+
+      const lastPoint = data.pnlHistory.at(-1);
+      if (!lastPoint) {
+        return 0;
+      }
+
+      return Number(lastPoint[1]);
+    }
+
+    return 0;
+  }
+
   async fetchAccountSnapshot(accountAddress: `0x${string}`): Promise<HyperliquidAccountSnapshot> {
     const state = await this.infoClient.clearinghouseState({ user: accountAddress });
     const positionsBySymbol = new Map<string, HyperliquidAccountPosition>();

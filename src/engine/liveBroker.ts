@@ -144,6 +144,8 @@ export class HyperliquidLiveBroker implements Broker {
   private initialized = false;
   /** Cumulative net funding from `userFunding` (refreshed each prepareSnapshot). */
   private lifetimeFundingUsd = 0;
+  /** Latest `allTime` portfolio PnL from the exchange (prepareSnapshot). */
+  private portfolioAllTimePnlUsd = 0;
   private nextProtectiveOrderSequence = 1;
 
   constructor(
@@ -225,6 +227,12 @@ export class HyperliquidLiveBroker implements Broker {
     } catch {
       // Keep last known value on transient API errors.
     }
+
+    try {
+      this.portfolioAllTimePnlUsd = await this.gateway.fetchPortfolioAllTimePnlUsd(this.accountAddress);
+    } catch {
+      // Keep last known value on transient API errors.
+    }
   }
 
   hasOpenPosition(symbol: string, strategyId: string): boolean {
@@ -247,6 +255,7 @@ export class HyperliquidLiveBroker implements Broker {
       realizedPnlUsd: this.realizedPnlUsd,
       lifetimeFundingUsd: this.lifetimeFundingUsd,
       unrealizedPnlUsd,
+      allTimePnlUsd: this.portfolioAllTimePnlUsd,
       equityUsd: this.currentAccountValueUsd ?? localEquityUsd,
       maxDrawdownPct: this.maxDrawdownPct,
       grossProfitUsd: this.grossProfitUsd,

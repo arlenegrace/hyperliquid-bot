@@ -2,11 +2,11 @@ import { HyperliquidClient } from "../clients/hyperliquid.js";
 import {
   formatBotCycleTimestamp,
   formatConsoleLabel,
-  formatConsoleSymbol,
   formatConsoleSymbolListGreen,
   formatConsoleTimestamp,
-  formatSignedPnlUsdColored,
+  formatSignedUsdWithDollarPrefixColored,
   normalizeConsoleMessage,
+  wrapRed,
 } from "../consoleFormat.js";
 import type { BotConfig, TradingStrategy } from "../types.js";
 import {
@@ -49,13 +49,8 @@ export class TradingBot {
 
     await this.broker.prepareSnapshot();
     const snapshot = this.broker.snapshot();
-    const realizedInclFundingUsd = snapshot.realizedPnlUsd + snapshot.lifetimeFundingUsd;
-    const fundingNote =
-      snapshot.lifetimeFundingUsd !== 0
-        ? ` (trades ${formatSignedPnlUsdColored(snapshot.realizedPnlUsd)}, funding ${formatSignedPnlUsdColored(snapshot.lifetimeFundingUsd)})`
-        : "";
     console.log(
-      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedPnlUsdColored(snapshot.unrealizedPnlUsd)}, realized PnL: ${formatSignedPnlUsdColored(realizedInclFundingUsd)}${fundingNote}.`,
+      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.unrealizedPnlUsd, { suffix: " USD" })}, all time PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.allTimePnlUsd, { suffix: "" })}.`,
     );
     await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
   }
@@ -74,9 +69,16 @@ export class TradingBot {
         return;
       }
 
+      const manualRange = getManualRangeForSymbol(manualRanges, symbol);
+      let manualRangeState = manualRange ? syncManualRangeState(this.manualRangeStates.get(symbol), manualRange) : undefined;
+
       const lastProcessedCloseTime = this.lastProcessedCloseTimeBySymbol.get(symbol);
       if (lastProcessedCloseTime === latestClosedCandle.closeTime) {
-        console.log(`${formatConsoleLabel(symbol)} No new closed ${this.config.interval} candle yet.`);
+        if (manualRangeState?.isInvalidated) {
+          console.log(`${formatConsoleLabel(symbol)} ${wrapRed("Range has been invalidated.")}`);
+        } else {
+          console.log(`${formatConsoleLabel(symbol)} No new closed ${this.config.interval} candle yet.`);
+        }
         return;
       }
 
@@ -87,9 +89,6 @@ export class TradingBot {
       for (const logLine of await this.broker.processCandle(symbol, latestClosedCandle)) {
         console.log(`${formatConsoleLabel(symbol)} ${normalizeConsoleMessage(symbol, logLine)}`);
       }
-
-      const manualRange = getManualRangeForSymbol(manualRanges, symbol);
-      let manualRangeState = manualRange ? syncManualRangeState(this.manualRangeStates.get(symbol), manualRange) : undefined;
 
       if (manualRange && manualRangeState) {
         manualRangeState = refreshManualRangeTrackingFromCandles(manualRangeState, manualRange, candles);
@@ -104,15 +103,6 @@ export class TradingBot {
         );
         manualRangeState = invalidationResult.state;
         this.manualRangeStates.set(symbol, manualRangeState);
-
-        if (invalidationResult.invalidatedNow) {
-          console.log(
-            `${formatConsoleLabel(symbol)} ${manualRangeState.invalidationReason?.replace(
-              new RegExp(`\\b${symbol}\\b`, "g"),
-              formatConsoleSymbol(symbol),
-            ) ?? ""}`,
-          );
-        }
       } else if (!manualRange) {
         this.manualRangeStates.delete(symbol);
       }
@@ -133,7 +123,10 @@ export class TradingBot {
         const result = strategy.evaluate(strategyContext);
 
         for (const note of result.notes) {
-          console.log(`${formatConsoleLabel(symbol)} ${normalizeConsoleMessage(symbol, note)}`);
+          const body = manualRangeState?.isInvalidated
+            ? wrapRed(normalizeConsoleMessage(symbol, note))
+            : normalizeConsoleMessage(symbol, note);
+          console.log(`${formatConsoleLabel(symbol)} ${body}`);
         }
 
         for (const cancellation of result.positionCancellations ?? []) {
