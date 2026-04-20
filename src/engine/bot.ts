@@ -4,6 +4,7 @@ import {
   formatConsoleLabel,
   formatConsoleSymbolListGreen,
   formatConsoleTimestamp,
+  formatPerpPriceForConsole,
   formatSignedUsdWithDollarPrefixColored,
   normalizeConsoleMessage,
   wrapRed,
@@ -83,7 +84,7 @@ export class TradingBot {
       }
 
       console.log(
-        `${formatConsoleLabel(symbol)} Loaded ${candles.length} closed candles. Latest close ${latestClosedCandle.close.toFixed(2)} at ${formatConsoleTimestamp(latestClosedCandle.closeTime)}.`,
+        `${formatConsoleLabel(symbol)} Loaded ${candles.length} closed candles. Latest close ${formatPerpPriceForConsole(latestClosedCandle.close)} at ${formatConsoleTimestamp(latestClosedCandle.closeTime)}.`,
       );
 
       for (const logLine of await this.broker.processCandle(symbol, latestClosedCandle)) {

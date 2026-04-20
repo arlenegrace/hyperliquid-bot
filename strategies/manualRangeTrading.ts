@@ -1,4 +1,4 @@
-import { wrapOrange } from "../src/consoleFormat.js";
+import { formatPerpPriceForConsole, wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import { calculateSignalRiskBudgetUsd, getNetPositionSnapshot, isFlipSignal, sumPositionStopRiskUsd } from "../src/risk.js";
 import type {
@@ -335,7 +335,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
         stopLossTooWide(reclaimEvent.side, stopLoss, range.low, range.high, context.config.manualRangeMaxStopExtensionPct)
       ) {
         notes.push(
-          `${context.symbol}: skipped ${reclaimEvent.side} reclaim because stop ${stopLoss.toFixed(2)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance for range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: skipped ${reclaimEvent.side} reclaim because stop ${formatPerpPriceForConsole(stopLoss)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance for range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)}.`,
         );
       } else {
         const flipSignal = isFlipSignal(reclaimEvent.side, context.openPositions);
@@ -394,8 +394,8 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
           notes: [
             ...notes,
             flipSignal
-              ? `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} and will flatten the current ${netPositionBeforeEntry?.side ?? "opposite"} before opening new ${reclaimEvent.side} risk up to ${signalRiskUsd.toFixed(2)} USD.`
-              : `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with ${signalRiskUsd.toFixed(2)} USD risk budget remaining.`,
+              ? `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} and will flatten the current ${netPositionBeforeEntry?.side ?? "opposite"} before opening new ${reclaimEvent.side} risk up to ${signalRiskUsd.toFixed(2)} USD.`
+              : `${context.symbol}: manual ${reclaimEvent.side} reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} with ${signalRiskUsd.toFixed(2)} USD risk budget remaining.`,
           ],
           ...(positionCancellations.length > 0 ? { positionCancellations } : {}),
           signal: {
@@ -453,7 +453,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
         stopLossTooWide("long", stopLoss, range.low, range.high, context.config.manualRangeMaxStopExtensionPct)
       ) {
         notes.push(
-          `${context.symbol}: long edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance.`,
+          `${context.symbol}: long edge re-entry skipped because stop ${formatPerpPriceForConsole(stopLoss)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance.`,
         );
       } else {
         const flipSignal = isFlipSignal("long", context.openPositions);
@@ -528,7 +528,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
         stopLossTooWide("short", stopLoss, range.low, range.high, context.config.manualRangeMaxStopExtensionPct)
       ) {
         notes.push(
-          `${context.symbol}: short edge re-entry skipped because stop ${stopLoss.toFixed(2)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance.`,
+          `${context.symbol}: short edge re-entry skipped because stop ${formatPerpPriceForConsole(stopLoss)} exceeds the ${maxStopExtensionLabel(context.config.manualRangeMaxStopExtensionPct)} max stop distance.`,
         );
       } else {
         const flipSignal = isFlipSignal("short", context.openPositions);
@@ -590,7 +590,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
     }
 
     notes.push(
-      `${context.symbol}: manual range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim or edge re-entry setup exists on the newest closed candle for ${wrapOrange(this.id)}.`,
+      `${context.symbol}: manual range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} is active, but no fresh reclaim or edge re-entry setup exists on the newest closed candle for ${wrapOrange(this.id)}.`,
     );
 
     return {

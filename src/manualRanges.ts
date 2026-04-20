@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { formatPerpPriceForConsole } from "./consoleFormat.js";
 import type {
   Candle,
   ManualRangeDefinition,
@@ -300,7 +301,7 @@ export function applyManualRangeInvalidation(
         isInvalidated: true,
         invalidatedAt: candle.closeTime,
         invalidationPrice: candle.close,
-        invalidationReason: `Close ${candle.close.toFixed(2)} exceeded manual range invalidation level ${upperInvalidationPrice.toFixed(2)} above ${range.rangeHigh.toFixed(2)}.`,
+        invalidationReason: `Close ${formatPerpPriceForConsole(candle.close)} exceeded manual range invalidation level ${formatPerpPriceForConsole(upperInvalidationPrice)} above ${formatPerpPriceForConsole(range.rangeHigh)}.`,
       },
       invalidatedNow: true,
     };
@@ -313,7 +314,7 @@ export function applyManualRangeInvalidation(
         isInvalidated: true,
         invalidatedAt: candle.closeTime,
         invalidationPrice: candle.close,
-        invalidationReason: `Close ${candle.close.toFixed(2)} exceeded manual range invalidation level ${lowerInvalidationPrice.toFixed(2)} below ${range.rangeLow.toFixed(2)}.`,
+        invalidationReason: `Close ${formatPerpPriceForConsole(candle.close)} exceeded manual range invalidation level ${formatPerpPriceForConsole(lowerInvalidationPrice)} below ${formatPerpPriceForConsole(range.rangeLow)}.`,
       },
       invalidatedNow: true,
     };

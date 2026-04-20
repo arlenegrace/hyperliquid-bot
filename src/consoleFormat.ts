@@ -45,6 +45,19 @@ export function formatSignedPnlUsdColored(usd: number): string {
   return `${ANSI_GREEN}${text}${ANSI_RESET}`;
 }
 
+const perpPriceConsoleFormatter = new Intl.NumberFormat("en-US", {
+  maximumSignificantDigits: 5,
+  useGrouping: false,
+});
+
+/** Perp/mark price for console logs (5 significant figures, aligned with Hyperliquid tick display). */
+export function formatPerpPriceForConsole(price: number): string {
+  if (!Number.isFinite(price)) {
+    return String(price);
+  }
+  return perpPriceConsoleFormatter.format(price);
+}
+
 export function formatConsoleSymbol(symbol: string): string {
   return `$${symbol.toUpperCase()}`;
 }

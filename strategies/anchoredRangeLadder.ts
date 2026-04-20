@@ -2,6 +2,7 @@ import {
   findAnchoredRange,
   findLatestReclaimEvent,
 } from "../src/analysis/rangeResearch.js";
+import { formatPerpPriceForConsole } from "../src/consoleFormat.js";
 import type {
   StrategyContext,
   StrategyResult,
@@ -43,7 +44,7 @@ export class AnchoredRangeLadderStrategy implements TradingStrategy {
     if (!reclaimEvent) {
       return {
         notes: [
-          `${context.symbol}: anchored range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim setup exists.`,
+          `${context.symbol}: anchored range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} is active, but no fresh reclaim setup exists.`,
         ],
       };
     }
@@ -58,7 +59,7 @@ export class AnchoredRangeLadderStrategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: long reclaim confirmed inside anchored range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: long reclaim confirmed inside anchored range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)}.`,
         ],
         signal: {
           strategyId: this.id,
@@ -86,7 +87,7 @@ export class AnchoredRangeLadderStrategy implements TradingStrategy {
 
     return {
       notes: [
-        `${context.symbol}: short reclaim confirmed inside anchored range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+        `${context.symbol}: short reclaim confirmed inside anchored range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)}.`,
       ],
       signal: {
         strategyId: this.id,

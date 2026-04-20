@@ -98,7 +98,6 @@ test("allocateEntryOrderSizeUnits gives remainder steps to lowest-priced short l
 test("buildPlannedEntryOrders keeps short ladder notional under the configured USD size cap", () => {
   const signal = createSignal({
     side: "short",
-    maxRiskUsd: undefined,
     entryReferencePrice: 89.03,
     positionSizeUsd: 200,
     entryOrders: [
@@ -109,6 +108,7 @@ test("buildPlannedEntryOrders keeps short ladder notional under the configured U
       { label: "Entry 5", price: 89.71, sizeFraction: 0.2 },
     ],
   });
+  Reflect.deleteProperty(signal, "maxRiskUsd");
   const orders = buildPlannedEntryOrders(signal, 200, { szDecimals: 2 });
 
   assert.deepEqual(

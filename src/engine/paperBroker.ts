@@ -1,3 +1,4 @@
+import { formatPerpPriceForConsole } from "../consoleFormat.js";
 import type {
   Candle,
   BrokerPosition,
@@ -100,7 +101,7 @@ export class PaperBroker implements Broker {
     const intendedSizeUnits = entryOrders.reduce((sum, order) => sum + order.sizeUnits, 0);
     if (intendedSizeUnits <= POSITION_EPSILON) {
       return [
-        `${signal.symbol}: paper broker skipped ${signal.strategyId} because entry size resolved to zero at stop ${signal.stopLoss.toFixed(2)}.`,
+        `${signal.symbol}: paper broker skipped ${signal.strategyId} because entry size resolved to zero at stop ${formatPerpPriceForConsole(signal.stopLoss)}.`,
       ];
     }
 
@@ -138,7 +139,7 @@ export class PaperBroker implements Broker {
 
     const totalRiskUsd = entryOrders.reduce((sum, order) => sum + (order.riskBudgetUsd ?? 0), 0);
     const logs = [
-      `${signal.symbol}: armed ${signal.side} ${signal.setupKind ?? "entry"} from ${entryOrders[0]?.price.toFixed(2)} to ${entryOrders.at(-1)?.price.toFixed(2)} with stop ${signal.stopLoss.toFixed(2)}.`,
+      `${signal.symbol}: armed ${signal.side} ${signal.setupKind ?? "entry"} from ${formatPerpPriceForConsole(entryOrders[0]!.price)} to ${formatPerpPriceForConsole(entryOrders.at(-1)!.price)} with stop ${formatPerpPriceForConsole(signal.stopLoss)}.`,
       `${signal.symbol}: planned size ${intendedSizeUnits.toFixed(6)} units across ${entryOrders.length} entry orders${totalRiskUsd > 0 ? ` risking ${totalRiskUsd.toFixed(2)} USD at the stop` : ""}.`,
     ];
     if (signal.entryMode === "flip" && signal.netPositionBeforeEntry) {
@@ -372,7 +373,7 @@ export class PaperBroker implements Broker {
     this.totalFeesUsd += feeUsd;
 
     logs.push(
-      `${position.symbol}: ${order.label} filled at ${executedPrice.toFixed(2)} for ${(order.sizeUnits * executedPrice).toFixed(2)} USD notional. Fee ${feeUsd.toFixed(2)} USD. Avg entry ${position.averageEntryPrice.toFixed(2)}.`,
+      `${position.symbol}: ${order.label} filled at ${formatPerpPriceForConsole(executedPrice)} for ${(order.sizeUnits * executedPrice).toFixed(2)} USD notional. Fee ${feeUsd.toFixed(2)} USD. Avg entry ${formatPerpPriceForConsole(position.averageEntryPrice)}.`,
     );
 
     return logs;
@@ -405,7 +406,7 @@ export class PaperBroker implements Broker {
     this.totalFeesUsd += feeUsd;
 
     return [
-      `${position.symbol}: ${order.label} hit at ${executedPrice.toFixed(2)} for ${(sizeUnits * executedPrice).toFixed(2)} USD notional, fee ${feeUsd.toFixed(2)} USD, realized PnL ${realizedPnlUsd.toFixed(2)} USD.`,
+      `${position.symbol}: ${order.label} hit at ${formatPerpPriceForConsole(executedPrice)} for ${(sizeUnits * executedPrice).toFixed(2)} USD notional, fee ${feeUsd.toFixed(2)} USD, realized PnL ${realizedPnlUsd.toFixed(2)} USD.`,
     ];
   }
 
@@ -432,7 +433,7 @@ export class PaperBroker implements Broker {
     this.totalFeesUsd += feeUsd;
 
     const logs = [
-      `${position.symbol}: ${closeReason} at ${executedPrice.toFixed(2)}, fee ${feeUsd.toFixed(2)} USD, realized PnL ${realizedPnlUsd.toFixed(2)} USD on remaining size.`,
+      `${position.symbol}: ${closeReason} at ${formatPerpPriceForConsole(executedPrice)}, fee ${feeUsd.toFixed(2)} USD, realized PnL ${realizedPnlUsd.toFixed(2)} USD on remaining size.`,
     ];
 
     if (note) {

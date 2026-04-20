@@ -74,7 +74,11 @@ export function allocateEntryOrderSizeUnits({
       continue;
     }
 
-    steps[index] += 1;
+    const priorSteps = steps[index];
+    if (priorSteps === undefined) {
+      continue;
+    }
+    steps[index] = priorSteps + 1;
     plannedNotionalUsd += stepNotionalUsd;
   }
 

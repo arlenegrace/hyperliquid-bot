@@ -6,6 +6,7 @@ import {
   ANSI_RESET,
   formatConsoleSymbol,
   formatConsoleSymbolList,
+  formatPerpPriceForConsole,
   wrapOrange,
 } from "./consoleFormat.js";
 import { TradingBot } from "./engine/bot.js";
@@ -57,7 +58,7 @@ async function main(): Promise<void> {
       return `${colorize(symbol, ANSI_RED)} (range invalidated)`;
     }
 
-    return `${colorize(symbol, ANSI_GREEN)} (${manualRange.rangeLow.toFixed(2)} - ${manualRange.rangeHigh.toFixed(2)})`;
+    return `${colorize(symbol, ANSI_GREEN)} (${formatPerpPriceForConsole(manualRange.rangeLow)} - ${formatPerpPriceForConsole(manualRange.rangeHigh)})`;
   });
   console.log(`[boot] Manual range coverage: ${rangeStatuses.join(", ")}`);
 

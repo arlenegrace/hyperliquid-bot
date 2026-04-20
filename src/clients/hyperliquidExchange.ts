@@ -118,12 +118,18 @@ function sumUnifiedSpotPortfolioUsd(
       continue;
     }
 
-    const quoteToken = tokenByIndex.get(universe.tokens[1]);
+    const baseTokenIndex = universe.tokens[0];
+    const quoteTokenIndex = universe.tokens[1];
+    if (baseTokenIndex === undefined || quoteTokenIndex === undefined) {
+      continue;
+    }
+
+    const quoteToken = tokenByIndex.get(quoteTokenIndex);
     if (!quoteToken || (quoteToken.name !== "USDC" && quoteToken.name !== "USDH")) {
       continue;
     }
 
-    usdMarkByBaseTokenIndex.set(universe.tokens[0], parseNumber(ctx.markPx));
+    usdMarkByBaseTokenIndex.set(baseTokenIndex, parseNumber(ctx.markPx));
   }
 
   let sum = 0;

@@ -1,5 +1,5 @@
 import { findLatestReclaimEvent } from "../src/analysis/rangeResearch.js";
-import { wrapOrange } from "../src/consoleFormat.js";
+import { formatPerpPriceForConsole, wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import type {
   StrategyContext,
@@ -58,7 +58,7 @@ export class ManualRangeTradingV2Strategy implements TradingStrategy {
     if (!reclaimEvent) {
       return {
         notes: [
-          `${context.symbol}: manual range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} is active, but no fresh reclaim setup exists on the newest closed candle for ${wrapOrange(this.id)}.`,
+          `${context.symbol}: manual range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} is active, but no fresh reclaim setup exists on the newest closed candle for ${wrapOrange(this.id)}.`,
         ],
       };
     }
@@ -80,7 +80,7 @@ export class ManualRangeTradingV2Strategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: manual v2 long reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with a ${riskBudgetUsd.toFixed(2)} USD stop-risk budget.`,
+          `${context.symbol}: manual v2 long reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} with a ${riskBudgetUsd.toFixed(2)} USD stop-risk budget.`,
         ],
         signal: {
           strategyId: this.id,
@@ -112,7 +112,7 @@ export class ManualRangeTradingV2Strategy implements TradingStrategy {
 
     return {
       notes: [
-        `${context.symbol}: manual v2 short reclaim confirmed inside range ${range.low.toFixed(2)} - ${range.high.toFixed(2)} with a ${riskBudgetUsd.toFixed(2)} USD stop-risk budget.`,
+        `${context.symbol}: manual v2 short reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} with a ${riskBudgetUsd.toFixed(2)} USD stop-risk budget.`,
       ],
       signal: {
         strategyId: this.id,

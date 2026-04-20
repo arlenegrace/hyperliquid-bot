@@ -1,4 +1,5 @@
 import { findAnchoredRange } from "../src/analysis/rangeResearch.js";
+import { formatPerpPriceForConsole } from "../src/consoleFormat.js";
 import type {
   StrategyContext,
   StrategyResult,
@@ -66,7 +67,7 @@ export class PivotClusterMeanReversionStrategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: long edge mean reversion setup found inside anchored range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: long edge mean reversion setup found inside anchored range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)}.`,
         ],
         signal: {
           strategyId: this.id,
@@ -101,7 +102,7 @@ export class PivotClusterMeanReversionStrategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: short edge mean reversion setup found inside anchored range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}.`,
+          `${context.symbol}: short edge mean reversion setup found inside anchored range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)}.`,
         ],
         signal: {
           strategyId: this.id,
@@ -128,7 +129,7 @@ export class PivotClusterMeanReversionStrategy implements TradingStrategy {
 
     return {
       notes: [
-        `${context.symbol}: no edge mean reversion setup. Range ${range.low.toFixed(2)} - ${range.high.toFixed(2)}, close ${signalCandle.close.toFixed(2)}.`,
+        `${context.symbol}: no edge mean reversion setup. Range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)}, close ${formatPerpPriceForConsole(signalCandle.close)}.`,
       ],
     };
   }
