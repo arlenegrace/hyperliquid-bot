@@ -1,4 +1,9 @@
 import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
+import type {
+  SpotClearinghouseStateResponse,
+  SpotMetaAndAssetCtxsResponse,
+  UserAbstractionResponse,
+} from "@nktkas/hyperliquid/api/info";
 import { SymbolConverter, formatPrice, formatSize } from "@nktkas/hyperliquid/utils";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -88,6 +93,77 @@ function parseNumber(value: string): number {
   return Number(value);
 }
 
+/**
+ * Unified / portfolio-margin accounts expose meaningful collateral in {@link SpotClearinghouseStateResponse};
+ * perp-only `marginSummary.accountValue` is not meaningful for those modes (Hyperliquid docs).
+ */
+function accountValueUsesSpotClearinghouseLedger(mode: UserAbstractionResponse): boolean {
+  return mode === "unifiedAccount" || mode === "portfolioMargin";
+}
+
+/**
+ * Total USD value of spot (and escrowed spot) balances: stables at par; other coins via USDC/USDH-quoted pair mark.
+ */
+function sumUnifiedSpotPortfolioUsd(
+  spotState: SpotClearinghouseStateResponse,
+  [spotMeta, assetCtxs]: SpotMetaAndAssetCtxsResponse,
+): number {
+  const tokenByIndex = new Map(spotMeta.tokens.map((t) => [t.index, t]));
+
+  const usdMarkByBaseTokenIndex = new Map<number, number>();
+  for (let i = 0; i < spotMeta.universe.length && i < assetCtxs.length; i++) {
+    const universe = spotMeta.universe[i];
+    const ctx = assetCtxs[i];
+    if (!universe?.tokens || universe.tokens.length < 2 || !ctx) {
+      continue;
+    }
+
+    const quoteToken = tokenByIndex.get(universe.tokens[1]);
+    if (!quoteToken || (quoteToken.name !== "USDC" && quoteToken.name !== "USDH")) {
+      continue;
+    }
+
+    usdMarkByBaseTokenIndex.set(universe.tokens[0], parseNumber(ctx.markPx));
+  }
+
+  let sum = 0;
+  for (const b of spotState.balances) {
+    const amt = parseNumber(b.total);
+    if (amt === 0) {
+      continue;
+    }
+
+    if (b.coin === "USDC" || b.coin === "USDH") {
+      sum += amt;
+      continue;
+    }
+
+    const mark = usdMarkByBaseTokenIndex.get(b.token);
+    if (mark !== undefined) {
+      sum += amt * mark;
+    }
+  }
+
+  for (const escrow of spotState.evmEscrows ?? []) {
+    const amt = parseNumber(escrow.total);
+    if (amt === 0) {
+      continue;
+    }
+
+    if (escrow.coin === "USDC" || escrow.coin === "USDH") {
+      sum += amt;
+      continue;
+    }
+
+    const mark = usdMarkByBaseTokenIndex.get(escrow.token);
+    if (mark !== undefined) {
+      sum += amt * mark;
+    }
+  }
+
+  return sum;
+}
+
 function normalizeTradeSide(side: "B" | "A"): TradeSide {
   return side === "B" ? "long" : "short";
 }
@@ -157,6 +233,8 @@ export class HyperliquidExchangeGateway {
   private readonly assetInfoBySymbol = new Map<string, HyperliquidAssetInfo>();
 
   private symbolConverter?: SymbolConverter;
+  /** Cache: global spot pair metadata + marks (safe to reuse across users). */
+  private spotMetaAndAssetCtxsCache?: Promise<SpotMetaAndAssetCtxsResponse>;
 
   constructor(
     private readonly apiBaseUrl: string,
@@ -223,6 +301,14 @@ export class HyperliquidExchangeGateway {
     }
 
     return assetInfo;
+  }
+
+  private getSpotMetaAndAssetCtxs(): Promise<SpotMetaAndAssetCtxsResponse> {
+    if (!this.spotMetaAndAssetCtxsCache) {
+      this.spotMetaAndAssetCtxsCache = this.infoClient.spotMetaAndAssetCtxs();
+    }
+
+    return this.spotMetaAndAssetCtxsCache;
   }
 
   async ensureLeverage(symbol: string, leverageSetting: LeverageSetting, marginMode: MarginMode): Promise<number> {
@@ -294,7 +380,11 @@ export class HyperliquidExchangeGateway {
   }
 
   async fetchAccountSnapshot(accountAddress: `0x${string}`): Promise<HyperliquidAccountSnapshot> {
-    const state = await this.infoClient.clearinghouseState({ user: accountAddress });
+    const [abstraction, state] = await Promise.all([
+      this.infoClient.userAbstraction({ user: accountAddress }),
+      this.infoClient.clearinghouseState({ user: accountAddress }),
+    ]);
+
     const positionsBySymbol = new Map<string, HyperliquidAccountPosition>();
 
     for (const assetPosition of state.assetPositions) {
@@ -312,8 +402,21 @@ export class HyperliquidExchangeGateway {
       });
     }
 
+    let accountValueUsd = parseNumber(state.marginSummary.accountValue);
+    if (accountValueUsesSpotClearinghouseLedger(abstraction)) {
+      try {
+        const [spotState, spotMetaTuple] = await Promise.all([
+          this.infoClient.spotClearinghouseState({ user: accountAddress }),
+          this.getSpotMetaAndAssetCtxs(),
+        ]);
+        accountValueUsd = sumUnifiedSpotPortfolioUsd(spotState, spotMetaTuple);
+      } catch {
+        // Transient errors: keep perp margin summary (may disagree with UI in unified mode).
+      }
+    }
+
     return {
-      accountValueUsd: parseNumber(state.marginSummary.accountValue),
+      accountValueUsd,
       withdrawableUsd: parseNumber(state.withdrawable),
       positionsBySymbol,
     };
