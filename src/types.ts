@@ -1,7 +1,6 @@
 export type CandleInterval = "4h";
 export type TradeSide = "long" | "short";
-export type PivotType = "high" | "low";
-export type RangeSource = "pivot-cluster" | "manual";
+export type RangeSource = "manual";
 export type OrderStatus = "pending" | "filled" | "cancelled";
 export type ExecutionMode = "paper" | "live";
 export type MarginMode = "cross" | "isolated";
@@ -27,25 +26,6 @@ export interface Candle {
   trades: number;
 }
 
-export interface PivotPoint {
-  type: PivotType;
-  index: number;
-  price: number;
-  candle: Candle;
-}
-
-export interface PivotCluster {
-  type: PivotType;
-  level: number;
-  tolerancePct: number;
-  points: PivotPoint[];
-  touchCount: number;
-  firstTouchIndex: number;
-  lastTouchIndex: number;
-  firstTouchTime: number;
-  lastTouchTime: number;
-}
-
 export interface RangeSnapshot {
   high: number;
   low: number;
@@ -61,6 +41,12 @@ export interface RangeSnapshot {
   lowTouchCount: number;
   source: RangeSource;
   confidenceScore: number;
+}
+
+export interface ReclaimEvent {
+  side: TradeSide;
+  deviationCandle: Candle;
+  reclaimCandle: Candle;
 }
 
 export interface ManualRangeDefinition {
@@ -172,13 +158,6 @@ export interface BotConfig {
   positionSizeUsd: number;
   live: LiveTradingConfig;
   stopBufferPct: number;
-  pivotStrength: number;
-  pivotClusterTolerancePct: number;
-  rangeMinBoundaryTouches: number;
-  rangeMinWidthPct: number;
-  rangeMaxWidthPct: number;
-  rangeMaxAgeCandles: number;
-  rangeInsideCloseRatio: number;
   reclaimLookbackCandles: number;
   ladderLevels: number;
   ladderEntryBandPct: number;

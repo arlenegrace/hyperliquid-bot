@@ -64,13 +64,6 @@ const configFileSchema = z
     manualRangeMaxRiskPct: z.coerce.number().positive().max(0.25).optional(),
     manualRangeMaxStopExtensionPct: z.coerce.number().positive().max(2).optional(),
     stopBufferPct: z.coerce.number().positive().max(0.05).optional(),
-    pivotStrength: z.coerce.number().int().min(1).max(10).optional(),
-    pivotClusterTolerancePct: z.coerce.number().positive().max(0.05).optional(),
-    rangeMinBoundaryTouches: z.coerce.number().int().min(2).max(5).optional(),
-    rangeMinWidthPct: z.coerce.number().positive().max(0.25).optional(),
-    rangeMaxWidthPct: z.coerce.number().positive().max(0.5).optional(),
-    rangeMaxAgeCandles: z.coerce.number().int().min(10).max(300).optional(),
-    rangeInsideCloseRatio: z.coerce.number().gt(0).lte(1).optional(),
     reclaimLookbackCandles: z.coerce.number().int().min(2).max(50).optional(),
     ladderLevels: z.coerce.number().int().min(2).max(10).optional(),
     ladderEntryBandPct: z.coerce.number().gt(0).lt(0.5).optional(),
@@ -113,13 +106,6 @@ const fullConfigSchema = z.object({
   manualRangeMaxRiskPct: z.coerce.number().positive().max(0.25),
   manualRangeMaxStopExtensionPct: z.coerce.number().positive().max(2),
   stopBufferPct: z.coerce.number().positive().max(0.05),
-  pivotStrength: z.coerce.number().int().min(1).max(10),
-  pivotClusterTolerancePct: z.coerce.number().positive().max(0.05),
-  rangeMinBoundaryTouches: z.coerce.number().int().min(2).max(5),
-  rangeMinWidthPct: z.coerce.number().positive().max(0.25),
-  rangeMaxWidthPct: z.coerce.number().positive().max(0.5),
-  rangeMaxAgeCandles: z.coerce.number().int().min(10).max(300),
-  rangeInsideCloseRatio: z.coerce.number().gt(0).lte(1),
   reclaimLookbackCandles: z.coerce.number().int().min(2).max(50),
   ladderLevels: z.coerce.number().int().min(2).max(10),
   ladderEntryBandPct: z.coerce.number().gt(0).lt(0.5),
@@ -165,13 +151,6 @@ const defaultConfig: FullConfig = {
   manualRangeMaxRiskPct: 0.05,
   manualRangeMaxStopExtensionPct: 0.5,
   stopBufferPct: 0.001,
-  pivotStrength: 3,
-  pivotClusterTolerancePct: 0.012,
-  rangeMinBoundaryTouches: 2,
-  rangeMinWidthPct: 0.06,
-  rangeMaxWidthPct: 0.18,
-  rangeMaxAgeCandles: 90,
-  rangeInsideCloseRatio: 0.55,
   reclaimLookbackCandles: 12,
   ladderLevels: 5,
   ladderEntryBandPct: 0.2,
@@ -257,27 +236,6 @@ function legacyEnvPatch(env: NodeJS.ProcessEnv): ConfigPatch {
   }
   if (env.STOP_BUFFER_PCT !== undefined && env.STOP_BUFFER_PCT !== "") {
     patch.stopBufferPct = z.coerce.number().positive().max(0.05).parse(env.STOP_BUFFER_PCT);
-  }
-  if (env.PIVOT_STRENGTH !== undefined && env.PIVOT_STRENGTH !== "") {
-    patch.pivotStrength = z.coerce.number().int().min(1).max(10).parse(env.PIVOT_STRENGTH);
-  }
-  if (env.PIVOT_CLUSTER_TOLERANCE_PCT !== undefined && env.PIVOT_CLUSTER_TOLERANCE_PCT !== "") {
-    patch.pivotClusterTolerancePct = z.coerce.number().positive().max(0.05).parse(env.PIVOT_CLUSTER_TOLERANCE_PCT);
-  }
-  if (env.RANGE_MIN_BOUNDARY_TOUCHES !== undefined && env.RANGE_MIN_BOUNDARY_TOUCHES !== "") {
-    patch.rangeMinBoundaryTouches = z.coerce.number().int().min(2).max(5).parse(env.RANGE_MIN_BOUNDARY_TOUCHES);
-  }
-  if (env.RANGE_MIN_WIDTH_PCT !== undefined && env.RANGE_MIN_WIDTH_PCT !== "") {
-    patch.rangeMinWidthPct = z.coerce.number().positive().max(0.25).parse(env.RANGE_MIN_WIDTH_PCT);
-  }
-  if (env.RANGE_MAX_WIDTH_PCT !== undefined && env.RANGE_MAX_WIDTH_PCT !== "") {
-    patch.rangeMaxWidthPct = z.coerce.number().positive().max(0.5).parse(env.RANGE_MAX_WIDTH_PCT);
-  }
-  if (env.RANGE_MAX_AGE_CANDLES !== undefined && env.RANGE_MAX_AGE_CANDLES !== "") {
-    patch.rangeMaxAgeCandles = z.coerce.number().int().min(10).max(300).parse(env.RANGE_MAX_AGE_CANDLES);
-  }
-  if (env.RANGE_INSIDE_CLOSE_RATIO !== undefined && env.RANGE_INSIDE_CLOSE_RATIO !== "") {
-    patch.rangeInsideCloseRatio = z.coerce.number().gt(0).lte(1).parse(env.RANGE_INSIDE_CLOSE_RATIO);
   }
   if (env.RECLAIM_LOOKBACK_CANDLES !== undefined && env.RECLAIM_LOOKBACK_CANDLES !== "") {
     patch.reclaimLookbackCandles = z.coerce.number().int().min(2).max(50).parse(env.RECLAIM_LOOKBACK_CANDLES);
@@ -417,13 +375,6 @@ export function loadConfig(): BotConfig {
     },
     manualRangeMaxRiskPct: parsed.manualRangeMaxRiskPct,
     stopBufferPct: parsed.stopBufferPct,
-    pivotStrength: parsed.pivotStrength,
-    pivotClusterTolerancePct: parsed.pivotClusterTolerancePct,
-    rangeMinBoundaryTouches: parsed.rangeMinBoundaryTouches,
-    rangeMinWidthPct: parsed.rangeMinWidthPct,
-    rangeMaxWidthPct: parsed.rangeMaxWidthPct,
-    rangeMaxAgeCandles: parsed.rangeMaxAgeCandles,
-    rangeInsideCloseRatio: parsed.rangeInsideCloseRatio,
     reclaimLookbackCandles: parsed.reclaimLookbackCandles,
     ladderLevels: parsed.ladderLevels,
     ladderEntryBandPct: parsed.ladderEntryBandPct,

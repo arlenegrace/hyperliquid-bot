@@ -1,10 +1,8 @@
 import type { ActiveStrategyId, TradingStrategy } from "../src/types.js";
-import { AnchoredRangeLadderStrategy } from "./anchoredRangeLadder.js";
 import { ManualRangeTradingStrategy } from "./manualRangeTrading.js";
 import { ManualRangeTradingV1Strategy } from "./manualRangeTradingV1.js";
 import { ManualRangeTradingV2Strategy } from "./manualRangeTradingV2.js";
 import { ManualRangeTradingV3Strategy } from "./manualRangeTradingV3.js";
-import { PivotClusterMeanReversionStrategy } from "./pivotClusterMeanReversion.js";
 
 export function createAllStrategies(): TradingStrategy[] {
   return [
@@ -12,8 +10,6 @@ export function createAllStrategies(): TradingStrategy[] {
     new ManualRangeTradingV1Strategy(),
     new ManualRangeTradingV2Strategy(),
     new ManualRangeTradingV3Strategy(),
-    new AnchoredRangeLadderStrategy(),
-    new PivotClusterMeanReversionStrategy(),
   ];
 }
 

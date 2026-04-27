@@ -1,4 +1,4 @@
-import { findLatestReclaimEvent } from "../src/analysis/rangeResearch.js";
+import { findLatestReclaimEvent } from "../src/analysis/reclaimFromRange.js";
 import { formatPerpPriceForConsole, wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import type {

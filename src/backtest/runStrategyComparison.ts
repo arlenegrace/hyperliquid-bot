@@ -21,10 +21,8 @@ import type {
   PaperBrokerSnapshot,
   TradingStrategy,
 } from "../types.js";
-import { buildRangeResearchReport } from "../analysis/rangeResearch.js";
 import { createAllStrategies } from "../../strategies/index.js";
 
-const RESEARCH_START_TIME = Date.UTC(2026, 2, 0, 0, 0, 0, 0);
 const RESEARCH_END_TIME = Date.UTC(2027, 2, 28, 23, 59, 59, 999);
 const BACKTEST_TRADING_START_TIME = Date.UTC(2026, 1, 21, 0, 0, 0, 0);
 
@@ -338,12 +336,6 @@ async function main(): Promise<void> {
   const client = new HyperliquidClient(config.apiBaseUrl);
   const manualRanges = await loadManualRanges(config.manualRangeFile);
   const symbols = [...new Set([...config.backtestSymbols, ...Object.keys(manualRanges)])];
-
-  console.log(`[research] Fetching research candles for ${formatConsoleSymbolList(symbols)}.`);
-  const researchLines = await buildRangeResearchReport(client, config, symbols);
-  for (const line of researchLines) {
-    console.log(`[research] ${line}`);
-  }
 
   console.log(
     `[backtest] Fetching ${config.backtestLookbackCandles} recent 4h candles for ${formatConsoleSymbolList(symbols)}.`,
