@@ -1,16 +1,16 @@
-# Hyperliquid Trading Bot
+# hl-bot
 
-A TypeScript automated trading bot for the [Hyperliquid](https://hyperliquid.xyz) perpetuals exchange. The bot monitors a watchlist of crypto assets, detects chart patterns called **range reclaims**, and places laddered limit orders automatically — including stop losses and take profits.
+A TypeScript automated trading bot for the [Hyperliquid](https://hyperliquid.xyz) crypto exchange. The bot monitors a watchlist of crypto tokens, detects chart patterns called **range reclaims**, and places laddered limit orders automatically — including stop losses and take profits.
 
 It supports **paper trading** (simulated with no real money) and a guarded **live trading** mode backed by a dedicated wallet.
-
----
 
 ## How it works
 
 ### What is a "range"?
 
 A price range is a zone where an asset has historically bounced between a high and a low price multiple times. These zones often act as support or resistance.
+
+Ranges are formed when price moves aggressively in one direction and then pull back in the opposite direction. For example, if Bitcoin aggressively drops from $100K to $90K in one day before bouncing back up to $95K, $90K marks the range low and the pullback to $95K marks the range high.
 
 ### What is a "range reclaim"?
 
@@ -26,8 +26,6 @@ The bot evaluates signals on fully closed **4-hour candles**. This timeframe off
 ### What is "laddering"?
 
 Instead of placing one large order at a single price, the bot spreads entries and exits across several limit orders at different prices within a band near the range edge. This improves average fill price and reduces the impact of missing the exact level by a small amount.
-
----
 
 ## Strategies
 
@@ -56,8 +54,6 @@ Use this strategy when you want a simple, predictable dollar amount per trade.
 - An earlier variant kept in the repo for backtesting comparison.
 - Uses a single entry on a fresh reclaim or a split ladder when re-entering an existing setup.
 - Takes 50% profit at mid-range and holds the rest for a reversal near the far side.
-
----
 
 ## Manual range workflow
 
@@ -99,8 +95,6 @@ Example with `rangeLow = 65100` and `rangeHigh = 72200`:
 
 Once invalidated, the bot stops taking new trades on that asset until you update `manual-ranges.json`.
 
----
-
 ## What "no current setup" means
 
 When the bot logs "no current setup," it means the **most recently closed 4h candle** did not produce a fresh entry signal.
@@ -112,8 +106,6 @@ It does **not** mean:
 - or the bot found no setups anywhere in the past.
 
 A strategy can correctly identify multiple past setups while still having nothing actionable on the latest candle.
-
----
 
 ## Setup
 
@@ -144,8 +136,6 @@ npm run dev
 ```
 
 This simulates trades with no real money using your configured starting balance.
-
----
 
 ## Live trading setup
 
@@ -188,8 +178,6 @@ This simulates trades with no real money using your configured starting balance.
 | `live.dryRun: true`      | Initializes the live broker and reads account data, but blocks all order placement |
 | `live.enabled: false`    | Disables exchange writes even when `executionMode` is `"live"`                     |
 
-
----
 
 ## Configuration
 
@@ -241,8 +229,6 @@ All settings live in `config.json` (copy from `config.example.json`).
 | `backtestLookbackCandles` | How much historical data the backtest uses                 |
 
 
----
-
 ## Commands
 
 ```bash
@@ -275,8 +261,6 @@ npm run test
 ```
 
 Runs unit tests for config parsing, strategy selection, broker initialization, live sizing guardrails, and paper broker behavior.
-
----
 
 ## Project structure
 
@@ -312,11 +296,8 @@ Runs unit tests for config parsing, strategy selection, broker initialization, l
     └── types.ts
 ```
 
----
-
 ## Possible improvements
 
 - Persist invalidation state and backtest reports to disk for easier iteration.
 - Add websocket-based order and fill subscriptions so protective orders react faster than the polling loop.
 - Scale live position size gradually after confirming behavior across several weeks of paper and small-wallet live tracking.
-
