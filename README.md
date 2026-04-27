@@ -1,4 +1,4 @@
-# hl-bot
+# Hyperliquid Trading Bot
 
 A TypeScript automated trading bot for the [Hyperliquid](https://hyperliquid.xyz) crypto exchange. The bot monitors a watchlist of crypto tokens, detects chart patterns called **range reclaims**, and places laddered limit orders automatically — including stop losses and take profits.
 
@@ -301,3 +301,4 @@ Runs unit tests for config parsing, strategy selection, broker initialization, l
 - Persist invalidation state and backtest reports to disk for easier iteration.
 - Add websocket-based order and fill subscriptions so protective orders react faster than the polling loop.
 - Scale live position size gradually after confirming behavior across several weeks of paper and small-wallet live tracking.
+
