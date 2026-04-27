@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { loadConfig } from "./config.js";
@@ -112,4 +115,50 @@ test("loadConfig accepts max leverage and keeps cross margin by default", () => 
       assert.equal(config.live.marginMode, "cross");
     },
   );
+});
+
+test("loadConfig merges non-secrets from HL_BOT_CONFIG JSON", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hl-bot-cfg-"));
+  const cfgPath = path.join(dir, "bot.json");
+  fs.writeFileSync(
+    cfgPath,
+    JSON.stringify({
+      executionMode: "live",
+      activeStrategyId: "manual-range-trading-v1",
+      positionSizeUsd: 99,
+      live: { enabled: true, dryRun: false, marginMode: "isolated", maxNotionalUsd: 2500, maxOpenPositions: 7, slippageBps: 15 },
+    }),
+  );
+  withEnv(
+    {
+      HL_BOT_CONFIG: cfgPath,
+      HL_PRIVATE_KEY: LIVE_PRIVATE_KEY,
+      HL_ACCOUNT_ADDRESS: LIVE_ACCOUNT_ADDRESS,
+    },
+    () => {
+      const config = loadConfig();
+      assert.equal(config.executionMode, "live");
+      assert.equal(config.positionSizeUsd, 99);
+      assert.equal(config.live.enabled, true);
+      assert.equal(config.live.dryRun, false);
+      assert.equal(config.live.marginMode, "isolated");
+      assert.equal(config.live.maxNotionalUsd, 2_500);
+      assert.equal(config.live.maxOpenPositions, 7);
+      assert.equal(config.live.slippageBps, 15);
+    },
+  );
+});
+
+test("loadConfig rejects credential keys inside JSON file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hl-bot-cfg-"));
+  const cfgPath = path.join(dir, "bad.json");
+  fs.writeFileSync(
+    cfgPath,
+    JSON.stringify({
+      live: { privateKey: LIVE_PRIVATE_KEY },
+    }),
+  );
+  withEnv({ HL_BOT_CONFIG: cfgPath }, () => {
+    assert.throws(() => loadConfig(), /Unrecognized key/);
+  });
 });

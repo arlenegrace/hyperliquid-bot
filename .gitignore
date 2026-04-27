@@ -9,6 +9,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Local app config (example committed as config.example.json)
+config.json
 rules.md
 README.md
 
