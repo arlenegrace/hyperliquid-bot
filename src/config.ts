@@ -130,7 +130,7 @@ type ConfigPatch = {
 const defaultConfig: FullConfig = {
   apiBaseUrl: "https://api.hyperliquid.xyz",
   watchlist: ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
-  pollIntervalMs: 30_000,
+  pollIntervalMs: 3_600_000,
   executionMode: "paper",
   activeStrategyId: "manual-range-trading-v1",
   rangeLookbackCandles: 500,

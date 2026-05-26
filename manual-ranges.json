@@ -15,13 +15,6 @@
       "notes": "Based on Feb 8 high and Feb 12 low."
     },
     {
-      "symbol": "SOL",
-      "rangeLow": 76.55,
-      "rangeHigh": 89.709,
-      "validFromTime": "2026-02-12T12:00:00.000Z",
-      "notes": "SOL range based on the Feb 6 high and Feb 12 low."
-    },
-    {
       "symbol": "CRV",
       "rangeLow": 0.20373,
       "rangeHigh": 0.264,

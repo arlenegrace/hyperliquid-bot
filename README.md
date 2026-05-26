@@ -187,7 +187,7 @@ All settings live in `config.json` (copy from `config.example.json`).
 {
   "apiBaseUrl": "https://api.hyperliquid.xyz",
   "watchlist": ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
-  "pollIntervalMs": 60000,
+  "pollIntervalMs": 3600000,
   "executionMode": "paper",
   "activeStrategyId": "manual-range-trading-v1",
   "paperStartingBalanceUsd": 20,
