@@ -35,12 +35,27 @@ const activeStrategyIdSchema = z
   .enum(["manual-range-trading-v1", "manual-range-trading-v2", "manual-range-trading-v3"])
   .transform((value) => value as ActiveStrategyId);
 
+const runtimeModeSchema = z.enum(["websocket", "poll"]);
+
+const websocketConfigSchema = z
+  .object({
+    candleCloseGraceMs: z.coerce.number().int().min(0).max(5 * 60_000).optional(),
+    candleBatchDebounceMs: z.coerce.number().int().min(0).max(60_000).optional(),
+    marketDataStaleMs: z.coerce.number().int().min(60_000).optional(),
+    accountDataStaleMs: z.coerce.number().int().min(60_000).optional(),
+    safetyReconcileMs: z.coerce.number().int().min(0).optional(),
+    postWriteEventWaitMs: z.coerce.number().int().min(0).max(30_000).optional(),
+  })
+  .strict();
+
 /** Parsed JSON file; credentials must not appear here (use .env). */
 const configFileSchema = z
   .object({
     apiBaseUrl: z.string().url().optional(),
     watchlist: z.array(z.string()).optional(),
     pollIntervalMs: z.coerce.number().int().min(5_000).optional(),
+    runtimeMode: runtimeModeSchema.optional(),
+    websocket: websocketConfigSchema.optional(),
     executionMode: z.enum(["paper", "live"]).optional(),
     activeStrategyId: activeStrategyIdSchema.optional(),
     rangeLookbackCandles: z.coerce.number().int().min(5).max(5_000).optional(),
@@ -84,6 +99,15 @@ const fullConfigSchema = z.object({
   apiBaseUrl: z.string().url(),
   watchlist: z.array(z.string()).min(1, "watchlist must contain at least one symbol."),
   pollIntervalMs: z.coerce.number().int().min(5_000),
+  runtimeMode: runtimeModeSchema,
+  websocket: websocketConfigSchema.required({
+    candleCloseGraceMs: true,
+    candleBatchDebounceMs: true,
+    marketDataStaleMs: true,
+    accountDataStaleMs: true,
+    safetyReconcileMs: true,
+    postWriteEventWaitMs: true,
+  }),
   executionMode: z.enum(["paper", "live"]),
   activeStrategyId: activeStrategyIdSchema,
   rangeLookbackCandles: z.coerce.number().int().min(5).max(5_000),
@@ -124,13 +148,26 @@ const fullConfigSchema = z.object({
 type FullConfig = z.infer<typeof fullConfigSchema>;
 
 type ConfigPatch = {
-  [K in keyof FullConfig]?: K extends "live" ? Partial<FullConfig["live"]> : FullConfig[K];
+  [K in keyof FullConfig]?: K extends "live"
+    ? Partial<FullConfig["live"]>
+    : K extends "websocket"
+      ? Partial<FullConfig["websocket"]>
+      : FullConfig[K];
 };
 
 const defaultConfig: FullConfig = {
   apiBaseUrl: "https://api.hyperliquid.xyz",
   watchlist: ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
   pollIntervalMs: 3_600_000,
+  runtimeMode: "websocket",
+  websocket: {
+    candleCloseGraceMs: 10_000,
+    candleBatchDebounceMs: 5_000,
+    marketDataStaleMs: 5 * 60_000,
+    accountDataStaleMs: 5 * 60_000,
+    safetyReconcileMs: 4 * 60 * 60_000,
+    postWriteEventWaitMs: 2_000,
+  },
   executionMode: "paper",
   activeStrategyId: "manual-range-trading-v1",
   rangeLookbackCandles: 500,
@@ -167,11 +204,12 @@ const defaultConfig: FullConfig = {
 };
 
 function mergeConfigPatch(base: FullConfig, patch: ConfigPatch): FullConfig {
-  const { live, ...rest } = patch;
+  const { live, websocket, ...rest } = patch;
   return {
     ...base,
     ...rest,
     live: { ...base.live, ...(live ?? {}) },
+    websocket: { ...base.websocket, ...(websocket ?? {}) },
   };
 }
 
@@ -208,6 +246,9 @@ function legacyEnvPatch(env: NodeJS.ProcessEnv): ConfigPatch {
   }
   if (env.POLL_INTERVAL_MS !== undefined && env.POLL_INTERVAL_MS !== "") {
     patch.pollIntervalMs = z.coerce.number().int().min(5_000).parse(env.POLL_INTERVAL_MS);
+  }
+  if (env.RUNTIME_MODE !== undefined && env.RUNTIME_MODE !== "") {
+    patch.runtimeMode = runtimeModeSchema.parse(env.RUNTIME_MODE);
   }
   if (env.EXECUTION_MODE !== undefined && env.EXECUTION_MODE !== "") {
     patch.executionMode = z.enum(["paper", "live"]).parse(env.EXECUTION_MODE);
@@ -283,6 +324,39 @@ function legacyEnvPatch(env: NodeJS.ProcessEnv): ConfigPatch {
     patch.backtestSlippageRate = z.coerce.number().min(0).max(0.01).parse(env.BACKTEST_SLIPPAGE_RATE);
   }
 
+  const websocket: NonNullable<ConfigPatch["websocket"]> = {};
+  if (env.WS_CANDLE_CLOSE_GRACE_MS !== undefined && env.WS_CANDLE_CLOSE_GRACE_MS !== "") {
+    websocket.candleCloseGraceMs = z.coerce.number().int().min(0).max(5 * 60_000).parse(env.WS_CANDLE_CLOSE_GRACE_MS);
+  }
+  if (env.WS_CANDLE_BATCH_DEBOUNCE_MS !== undefined && env.WS_CANDLE_BATCH_DEBOUNCE_MS !== "") {
+    websocket.candleBatchDebounceMs = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(60_000)
+      .parse(env.WS_CANDLE_BATCH_DEBOUNCE_MS);
+  }
+  if (env.WS_MARKET_DATA_STALE_MS !== undefined && env.WS_MARKET_DATA_STALE_MS !== "") {
+    websocket.marketDataStaleMs = z.coerce.number().int().min(60_000).parse(env.WS_MARKET_DATA_STALE_MS);
+  }
+  if (env.WS_ACCOUNT_DATA_STALE_MS !== undefined && env.WS_ACCOUNT_DATA_STALE_MS !== "") {
+    websocket.accountDataStaleMs = z.coerce.number().int().min(60_000).parse(env.WS_ACCOUNT_DATA_STALE_MS);
+  }
+  if (env.WS_SAFETY_RECONCILE_MS !== undefined && env.WS_SAFETY_RECONCILE_MS !== "") {
+    websocket.safetyReconcileMs = z.coerce.number().int().min(0).parse(env.WS_SAFETY_RECONCILE_MS);
+  }
+  if (env.WS_POST_WRITE_EVENT_WAIT_MS !== undefined && env.WS_POST_WRITE_EVENT_WAIT_MS !== "") {
+    websocket.postWriteEventWaitMs = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(30_000)
+      .parse(env.WS_POST_WRITE_EVENT_WAIT_MS);
+  }
+  if (Object.keys(websocket).length > 0) {
+    patch.websocket = websocket;
+  }
+
   if (env.LIVE_TRADING_ENABLED !== undefined && env.LIVE_TRADING_ENABLED !== "") {
     live.enabled = booleanEnv(false).parse(env.LIVE_TRADING_ENABLED);
   }
@@ -354,6 +428,8 @@ export function loadConfig(): BotConfig {
     interval: "4h",
     watchlist: parsed.watchlist,
     pollIntervalMs: parsed.pollIntervalMs,
+    runtimeMode: parsed.runtimeMode,
+    websocket: parsed.websocket,
     executionMode: parsed.executionMode,
     activeStrategyId: parsed.activeStrategyId,
     rangeLookbackCandles: parsed.rangeLookbackCandles,

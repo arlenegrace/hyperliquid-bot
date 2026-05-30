@@ -9,7 +9,7 @@ import {
   normalizeConsoleMessage,
   wrapRed,
 } from "../consoleFormat.js";
-import type { BotConfig, TradingStrategy } from "../types.js";
+import type { BotConfig, Candle, TradingStrategy } from "../types.js";
 import {
   applyManualRangeInvalidation,
   loadManualRangeStates,
@@ -45,18 +45,46 @@ export class TradingBot {
     console.log(`[bot] Loaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`);
 
     for (const symbol of this.config.watchlist) {
-      await this.processSymbol(symbol, manualRanges);
+      await this.processSymbolFromRest(symbol, manualRanges);
     }
 
-    await this.broker.prepareSnapshot();
-    const snapshot = this.broker.snapshot();
-    console.log(
-      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.unrealizedPnlUsd, { suffix: " USD" })}, all time PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.allTimePnlUsd, { suffix: "" })}, account equity: $${snapshot.equityUsd.toFixed(2)}.`,
-    );
+    await this.logCycleSummary();
     await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
   }
 
-  private async processSymbol(symbol: string, manualRanges: ManualRangeMap): Promise<void> {
+  async runForClosedCandles(candlesBySymbol: Map<string, Candle[]>): Promise<void> {
+    await this.ensureManualRangeStatesLoaded();
+    const manualRanges = await loadManualRanges(this.config.manualRangeFile);
+    for (const logLine of await this.broker.onCycleStart()) {
+      console.log(`[broker] ${logLine}`);
+    }
+
+    const symbols = this.config.watchlist.filter((symbol) => candlesBySymbol.has(symbol));
+    if (symbols.length === 0) {
+      return;
+    }
+
+    console.log(`[bot] Processing websocket candle close for ${formatConsoleSymbolListGreen(symbols)}.`);
+    console.log(`[bot] Loaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`);
+
+    for (const symbol of symbols) {
+      const candles = candlesBySymbol.get(symbol);
+      if (!candles) {
+        continue;
+      }
+
+      await this.processSymbolCandles(symbol, candles, manualRanges);
+    }
+
+    await this.logCycleSummary();
+    await saveManualRangeStates(this.config.manualRangeStateFile, this.manualRangeStates);
+  }
+
+  getLastProcessedCloseTime(symbol: string): number | undefined {
+    return this.lastProcessedCloseTimeBySymbol.get(symbol.toUpperCase());
+  }
+
+  private async processSymbolFromRest(symbol: string, manualRanges: ManualRangeMap): Promise<void> {
     try {
       const candles = await this.marketDataClient.fetchRecentClosedCandles(
         symbol,
@@ -64,6 +92,15 @@ export class TradingBot {
         this.config.rangeLookbackCandles + 2,
       );
 
+      await this.processSymbolCandles(symbol, candles, manualRanges);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${formatConsoleLabel(symbol)} Failed to process symbol: ${message}`);
+    }
+  }
+
+  private async processSymbolCandles(symbol: string, candles: Candle[], manualRanges: ManualRangeMap): Promise<void> {
+    try {
       const latestClosedCandle = candles.at(-1);
       if (!latestClosedCandle) {
         console.log(`${formatConsoleLabel(symbol)} No closed candles returned from Hyperliquid.`);
@@ -151,11 +188,19 @@ export class TradingBot {
       }
 
       await this.broker.recordEquity({ [symbol]: latestClosedCandle.close });
-      this.lastProcessedCloseTimeBySymbol.set(symbol, latestClosedCandle.closeTime);
+      this.lastProcessedCloseTimeBySymbol.set(symbol.toUpperCase(), latestClosedCandle.closeTime);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`${formatConsoleLabel(symbol)} Failed to process symbol: ${message}`);
     }
+  }
+
+  private async logCycleSummary(): Promise<void> {
+    await this.broker.prepareSnapshot();
+    const snapshot = this.broker.snapshot();
+    console.log(
+      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.unrealizedPnlUsd, { suffix: " USD" })}, all time PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.allTimePnlUsd, { suffix: "" })}, account equity: $${snapshot.equityUsd.toFixed(2)}.`,
+    );
   }
 
   private async ensureManualRangeStatesLoaded(): Promise<void> {

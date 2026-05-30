@@ -11,6 +11,7 @@ import {
 } from "./consoleFormat.js";
 import { TradingBot } from "./engine/bot.js";
 import { createBroker } from "./engine/createBroker.js";
+import { WebsocketRunner } from "./engine/websocketRunner.js";
 import {
   getManualRangeForSymbol,
   loadManualRanges,
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
   const brokerLogs = await broker.initialize();
 
   console.log(
-    `[boot] Hyperliquid ${config.executionMode} bot started in ${runOnceMode ? "single-run" : "interval"} mode.`,
+    `[boot] Hyperliquid ${config.executionMode} bot started in ${runOnceMode ? "single-run" : config.runtimeMode} mode.`,
   );
   for (const logLine of brokerLogs) {
     console.log(`[boot] ${logLine}`);
@@ -83,6 +84,12 @@ async function main(): Promise<void> {
       cycleRunning = false;
     }
   };
+
+  if (!runOnceMode && config.runtimeMode === "websocket") {
+    const runner = new WebsocketRunner(config, marketDataClient, broker, bot);
+    await runner.start();
+    return;
+  }
 
   await executeCycle();
 

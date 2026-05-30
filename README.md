@@ -188,6 +188,15 @@ All settings live in `config.json` (copy from `config.example.json`).
   "apiBaseUrl": "https://api.hyperliquid.xyz",
   "watchlist": ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
   "pollIntervalMs": 3600000,
+  "runtimeMode": "websocket",
+  "websocket": {
+    "candleCloseGraceMs": 10000,
+    "candleBatchDebounceMs": 5000,
+    "marketDataStaleMs": 300000,
+    "accountDataStaleMs": 300000,
+    "safetyReconcileMs": 14400000,
+    "postWriteEventWaitMs": 2000
+  },
   "executionMode": "paper",
   "activeStrategyId": "manual-range-trading-v1",
   "paperStartingBalanceUsd": 20,
@@ -218,6 +227,8 @@ All settings live in `config.json` (copy from `config.example.json`).
 
 | Setting                   | Description                                                |
 | ------------------------- | ---------------------------------------------------------- |
+| `runtimeMode`             | `"websocket"` for event-driven watch mode, `"poll"` for rollback |
+| `pollIntervalMs`          | REST polling cadence when `runtimeMode` is `"poll"`        |
 | `executionMode`           | `"paper"` for simulation, `"live"` for real trading        |
 | `activeStrategyId`        | Which strategy to run (default: `manual-range-trading-v1`) |
 | `positionSizeUsd`         | Fixed dollar amount per trade (used by v1)                 |
@@ -236,6 +247,8 @@ npm run dev
 ```
 
 Runs the bot in watch mode, re-evaluating signals on each new 4h candle.
+
+In the default websocket runtime, startup still uses REST once to bootstrap recent candles and run live safety checks. After that, watch mode listens to Hyperliquid candle, order, fill, open-order, funding, and clearinghouse websocket streams. REST is reserved for reconnect backfill, sparse live safety reconciliation, `--once` checks, and post-order fallback if a websocket confirmation does not arrive.
 
 ```bash
 npm run check
@@ -299,6 +312,6 @@ Runs unit tests for config parsing, strategy selection, broker initialization, l
 ## Possible improvements
 
 - Persist invalidation state and backtest reports to disk for easier iteration.
-- Add websocket-based order and fill subscriptions so protective orders react faster than the polling loop.
+- Add richer websocket health metrics and alerts for reconnect/backfill events.
 - Scale live position size gradually after confirming behavior across several weeks of paper and small-wallet live tracking.
 

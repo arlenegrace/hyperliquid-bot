@@ -11,6 +11,7 @@ import {
   type HyperliquidOpenOrder,
   type HyperliquidPlaceOrderSpec,
 } from "../clients/hyperliquidExchange.js";
+import type { HyperliquidAccountStreamEvent, HyperliquidOrderUpdate } from "../clients/hyperliquidSubscriptions.js";
 import type {
   BotConfig,
   BrokerPosition,
@@ -142,6 +143,11 @@ export class HyperliquidLiveBroker implements Broker {
   private openExchangeOrderIds = new Set<`0x${string}`>();
   private openExchangeOrderOids = new Set<number>();
   private initialized = false;
+  private remoteStreamFailedReason: string | undefined;
+  private lastAccountStreamEventAt = 0;
+  private lastFullReconcileAt = 0;
+  private readonly remoteEventQueue: HyperliquidAccountStreamEvent[] = [];
+  private readonly remoteEventWaiters: Array<() => void> = [];
   /** Cumulative net funding from `userFunding` (refreshed each prepareSnapshot). */
   private lifetimeFundingUsd = 0;
   /** Latest `allTime` portfolio PnL from the exchange (prepareSnapshot). */
@@ -166,12 +172,15 @@ export class HyperliquidLiveBroker implements Broker {
 
     const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
     this.applyAccountSnapshotPricing(accountSnapshot);
+    this.lastAccountStreamEventAt = Date.now();
     if (this.startingBalanceUsd <= 0) {
       this.startingBalanceUsd = accountSnapshot.accountValueUsd;
       this.peakEquityUsd = accountSnapshot.accountValueUsd;
     }
 
     const openOrders = await this.gateway.fetchOpenOrders(this.accountAddress);
+    this.applyOpenOrdersSnapshot(openOrders);
+    this.lastFullReconcileAt = Date.now();
     if (this.openPositions.size === 0 && accountSnapshot.positionsBySymbol.size > 0) {
       throw new Error(
         "The configured account already has open Hyperliquid positions, but the live broker state file does not track them. Flatten the account or restore the state file before enabling live mode.",
@@ -210,12 +219,24 @@ export class HyperliquidLiveBroker implements Broker {
 
   async onCycleStart(): Promise<string[]> {
     await this.assertInitialized();
+    if (this.usesWebsocketRuntime()) {
+      const logs = await this.drainRemoteEvents();
+      logs.push(...(await this.runSparseReconcileIfDue("scheduled websocket safety reconciliation")));
+      return logs;
+    }
+
     return this.syncRemoteState();
   }
 
   async prepareSnapshot(): Promise<void> {
     await this.assertInitialized();
     if (!this.accountAddress) {
+      return;
+    }
+
+    if (this.usesWebsocketRuntime()) {
+      await this.drainRemoteEvents();
+      await this.runSparseReconcileIfDue("scheduled websocket snapshot reconciliation");
       return;
     }
 
@@ -269,12 +290,58 @@ export class HyperliquidLiveBroker implements Broker {
     };
   }
 
+  getAccountAddress(): `0x${string}` | undefined {
+    return this.accountAddress;
+  }
+
+  enqueueRemoteEvent(event: HyperliquidAccountStreamEvent): void {
+    this.remoteEventQueue.push(event);
+    this.lastAccountStreamEventAt = event.receivedAt;
+    if (event.type !== "subscriptionFailure") {
+      this.remoteStreamFailedReason = undefined;
+    }
+
+    const waiters = this.remoteEventWaiters.splice(0);
+    for (const waiter of waiters) {
+      waiter();
+    }
+  }
+
+  markRemoteSubscriptionFailed(feed: string, reason: unknown): void {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    this.remoteStreamFailedReason = `${feed}: ${message}`;
+    this.enqueueRemoteEvent({
+      type: "subscriptionFailure",
+      receivedAt: Date.now(),
+      feed,
+      message,
+    });
+  }
+
   private applyAccountSnapshotPricing(accountSnapshot: HyperliquidAccountSnapshot): void {
     this.currentAccountValueUsd = accountSnapshot.accountValueUsd;
     this.lastExchangeUnrealizedBySymbol.clear();
     for (const [symbol, pos] of accountSnapshot.positionsBySymbol) {
       this.lastExchangeUnrealizedBySymbol.set(symbol, pos.unrealizedPnlUsd);
     }
+  }
+
+  private applyOpenOrdersSnapshot(openOrders: HyperliquidOpenOrder[]): Map<`0x${string}`, HyperliquidOpenOrder> {
+    this.openExchangeOrderIds = new Set(openOrders.flatMap((order) => (order.clientOrderId ? [order.clientOrderId] : [])));
+    this.openExchangeOrderOids = new Set(openOrders.map((order) => order.orderId));
+
+    const openOrdersByClientOrderId = new Map<`0x${string}`, HyperliquidOpenOrder>();
+    for (const order of openOrders) {
+      if (order.clientOrderId) {
+        openOrdersByClientOrderId.set(order.clientOrderId, order);
+      }
+    }
+
+    for (const position of this.openPositions.values()) {
+      this.hydrateTrackedExchangeOrderIds(position, openOrdersByClientOrderId);
+    }
+
+    return openOrdersByClientOrderId;
   }
 
   /** Clearinghouse uPnL when available; else candle marks (e.g. after a failed sync). */
@@ -348,6 +415,40 @@ export class HyperliquidLiveBroker implements Broker {
     }
   }
 
+  private buildKnownOrdersByClientOrderId(): Map<
+    `0x${string}`,
+    { position: BrokerPosition; kind: "entry" | "exit" | "stop"; order: TrackedPositionOrder }
+  > {
+    const knownOrdersByClientOrderId = new Map<
+      `0x${string}`,
+      { position: BrokerPosition; kind: "entry" | "exit" | "stop"; order: TrackedPositionOrder }
+    >();
+
+    for (const position of this.openPositions.values()) {
+      for (const order of position.entryOrders) {
+        if (order.clientOrderId) {
+          knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "entry", order });
+        }
+      }
+
+      for (const order of position.exitOrders) {
+        if (order.clientOrderId) {
+          knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "exit", order });
+        }
+      }
+
+      if (position.stopOrder?.clientOrderId) {
+        knownOrdersByClientOrderId.set(position.stopOrder.clientOrderId, {
+          position,
+          kind: "stop",
+          order: position.stopOrder,
+        });
+      }
+    }
+
+    return knownOrdersByClientOrderId;
+  }
+
   async openPosition(signal: StrategySignal): Promise<string[]> {
     await this.assertInitialized();
     const logs: string[] = [];
@@ -381,6 +482,21 @@ export class HyperliquidLiveBroker implements Broker {
     if (!this.writesEnabled()) {
       return [
         `${signal.symbol}: dry-run/live-disabled mode would place ${entryOrders.length} entry orders totalling ${intendedNotionalUsd.toFixed(2)} USD notional.`,
+      ];
+    }
+
+    const remoteEventLogs = await this.drainRemoteEvents();
+    logs.push(...remoteEventLogs);
+    if (this.remoteStreamFailedReason) {
+      return [
+        ...logs,
+        `${signal.symbol}: skipped live order because Hyperliquid websocket account state is unhealthy (${this.remoteStreamFailedReason}).`,
+      ];
+    }
+    if (this.accountStreamIsStale()) {
+      return [
+        ...logs,
+        `${signal.symbol}: skipped live order because Hyperliquid websocket account state is stale; waiting for stream recovery or sparse reconciliation.`,
       ];
     }
 
@@ -451,8 +567,23 @@ export class HyperliquidLiveBroker implements Broker {
     }
 
     await this.saveState();
-    logs.push(...(await this.syncRemoteState()));
-    logs.push(...(await this.ensureProtectiveOrders()));
+    if (this.usesWebsocketRuntime()) {
+      const needsConfirmation = results.some((result) => result.status === "filled" || result.status === "waitingForFill");
+      if (needsConfirmation) {
+        const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
+        logs.push(...(await this.drainRemoteEvents()));
+        if (!eventArrived) {
+          logs.push(`${position.symbol}: websocket fill confirmation did not arrive after entry placement; falling back to one REST reconciliation.`);
+          logs.push(...(await this.syncRemoteState()));
+        }
+      } else {
+        logs.push(...(await this.drainRemoteEvents()));
+      }
+      logs.push(...(await this.ensureProtectiveOrders()));
+    } else {
+      logs.push(...(await this.syncRemoteState()));
+      logs.push(...(await this.ensureProtectiveOrders()));
+    }
     await this.saveState();
 
     return logs;
@@ -486,7 +617,15 @@ export class HyperliquidLiveBroker implements Broker {
         },
       ]);
       logs.push(`${position.symbol}: submitted reduce-only market close for ${position.id}.`);
-      await this.syncRemoteState();
+      if (this.usesWebsocketRuntime()) {
+        const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
+        logs.push(...(await this.drainRemoteEvents()));
+        if (!eventArrived) {
+          logs.push(...(await this.syncRemoteState()));
+        }
+      } else {
+        await this.syncRemoteState();
+      }
     } else {
       logs.push(...this.cancelPositionLocally(position, closedAt, reason, note));
     }
@@ -516,6 +655,192 @@ export class HyperliquidLiveBroker implements Broker {
     await this.saveState();
   }
 
+  private async drainRemoteEvents(): Promise<string[]> {
+    const logs: string[] = [];
+    if (this.remoteEventQueue.length === 0) {
+      return logs;
+    }
+
+    const events = this.remoteEventQueue.splice(0).sort((left, right) => left.receivedAt - right.receivedAt);
+    for (const event of events) {
+      if (event.type === "subscriptionFailure") {
+        this.remoteStreamFailedReason = `${event.feed}: ${event.message}`;
+        logs.push(`Hyperliquid websocket subscription ${event.feed} failed: ${event.message}. Live entries are paused until reconciliation succeeds.`);
+        continue;
+      }
+
+      this.lastAccountStreamEventAt = event.receivedAt;
+
+      if (event.type === "clearinghouseState") {
+        this.applyAccountSnapshotPricing(event.snapshot);
+        continue;
+      }
+
+      if (event.type === "openOrders") {
+        this.applyOpenOrdersSnapshot(event.orders);
+        logs.push(...this.reconcileTrackedPositionsFromOrderState(event.receivedAt));
+        continue;
+      }
+
+      if (event.type === "orderUpdates") {
+        logs.push(...this.applyOrderUpdates(event.updates, event.receivedAt));
+        continue;
+      }
+
+      if (event.type === "fills") {
+        logs.push(...this.applyRemoteFills(event.fills, event.receivedAt));
+        continue;
+      }
+
+      if (event.type === "fundings") {
+        if (event.isSnapshot) {
+          this.lifetimeFundingUsd = event.fundings.reduce((sum, funding) => sum + funding.usdc, 0);
+        } else {
+          this.lifetimeFundingUsd += event.fundings.reduce((sum, funding) => sum + funding.usdc, 0);
+        }
+      }
+    }
+
+    logs.push(...(await this.ensureProtectiveOrders()));
+    this.trimProcessedTradeIds();
+    await this.recordEquity(Object.fromEntries(this.lastMarks.entries()));
+    await this.saveState();
+    return logs;
+  }
+
+  private applyRemoteFills(fills: HyperliquidFill[], timestamp: number): string[] {
+    const logs: string[] = [];
+    const knownOrdersByClientOrderId = this.buildKnownOrdersByClientOrderId();
+    const unprocessedFills = fills
+      .filter(
+        (fill) =>
+          fill.clientOrderId &&
+          knownOrdersByClientOrderId.has(fill.clientOrderId) &&
+          !this.processedTradeIds.has(fill.tradeId),
+      )
+      .sort((left, right) => left.time - right.time || left.tradeId - right.tradeId);
+
+    for (const fill of unprocessedFills) {
+      const route = knownOrdersByClientOrderId.get(fill.clientOrderId!);
+      if (!route) {
+        continue;
+      }
+
+      route.order.exchangeOrderId = fill.orderId;
+      if (route.kind === "entry") {
+        this.applyEntryFill(route.position, route.order as PositionEntryOrder, fill);
+        logs.push(`${fill.symbol}: websocket fill applied to ${route.position.id} entry order.`);
+      } else {
+        this.applyExitFill(
+          route.position,
+          route.order as PositionExitOrder | PositionStopOrder,
+          fill,
+          route.kind === "stop" ? "stop loss hit" : "exit order filled",
+        );
+        logs.push(`${fill.symbol}: websocket fill applied to ${route.position.id} ${route.kind} order.`);
+      }
+
+      this.processedTradeIds.add(fill.tradeId);
+    }
+
+    logs.push(...this.reconcileTrackedPositionsFromOrderState(timestamp));
+    return logs;
+  }
+
+  private applyOrderUpdates(updates: HyperliquidOrderUpdate[], timestamp: number): string[] {
+    for (const update of updates) {
+      const clientOrderId = update.order.clientOrderId;
+      if (update.status === "open" || update.status === "triggered") {
+        if (clientOrderId) {
+          this.openExchangeOrderIds.add(clientOrderId);
+        }
+        this.openExchangeOrderOids.add(update.order.orderId);
+        continue;
+      }
+
+      if (clientOrderId) {
+        this.openExchangeOrderIds.delete(clientOrderId);
+      }
+      this.openExchangeOrderOids.delete(update.order.orderId);
+    }
+
+    return this.reconcileTrackedPositionsFromOrderState(timestamp);
+  }
+
+  private reconcileTrackedPositionsFromOrderState(timestamp: number): string[] {
+    const logs: string[] = [];
+    for (const position of [...this.openPositions.values()]) {
+      this.reconcilePositionOrderStatuses(position);
+
+      if (position.status === "pending" && position.filledSizeUnits <= POSITION_EPSILON) {
+        const hasOpenEntryOrders = position.entryOrders.some((order) => this.isOrderOpenOnExchange(order));
+        if (!hasOpenEntryOrders) {
+          logs.push(...this.cancelPositionLocally(position, timestamp, "entry ladder expired or was cancelled by the exchange"));
+        }
+      }
+
+      if (position.status === "open" && position.remainingSizeUnits <= POSITION_EPSILON) {
+        logs.push(...this.finishPosition(position, timestamp, position.closeReason ?? "position fully exited"));
+      }
+    }
+
+    return logs;
+  }
+
+  private async runSparseReconcileIfDue(reason: string): Promise<string[]> {
+    if (!this.usesWebsocketRuntime() || this.config.websocket.safetyReconcileMs <= 0) {
+      return [];
+    }
+
+    const now = Date.now();
+    if (this.lastFullReconcileAt > 0 && now - this.lastFullReconcileAt < this.config.websocket.safetyReconcileMs) {
+      return [];
+    }
+
+    const logs = await this.syncRemoteState();
+    logs.unshift(`Hyperliquid ${reason}.`);
+    if (logs.length === 1) {
+      logs.push("Hyperliquid sparse reconciliation completed with no local changes.");
+    }
+    const reconcileFailed = logs.some((line) => line.startsWith("Hyperliquid sync failed:"));
+    if (!reconcileFailed) {
+      this.remoteStreamFailedReason = undefined;
+      this.lastAccountStreamEventAt = now;
+    }
+    return logs;
+  }
+
+  private usesWebsocketRuntime(): boolean {
+    return this.config.runtimeMode === "websocket";
+  }
+
+  private accountStreamIsStale(now = Date.now()): boolean {
+    return this.usesWebsocketRuntime() && now - this.lastAccountStreamEventAt > this.config.websocket.accountDataStaleMs;
+  }
+
+  private waitForRemoteEvent(timeoutMs: number): Promise<boolean> {
+    if (timeoutMs <= 0) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        const index = this.remoteEventWaiters.indexOf(resolveTrue);
+        if (index >= 0) {
+          this.remoteEventWaiters.splice(index, 1);
+        }
+        resolve(false);
+      }, timeoutMs);
+
+      const resolveTrue = (): void => {
+        clearTimeout(timeout);
+        resolve(true);
+      };
+
+      this.remoteEventWaiters.push(resolveTrue);
+    });
+  }
+
   private async syncRemoteState(): Promise<string[]> {
     if (!this.accountAddress) {
       return [];
@@ -536,45 +861,8 @@ export class HyperliquidLiveBroker implements Broker {
       ]);
 
       this.applyAccountSnapshotPricing(accountSnapshot);
-      this.openExchangeOrderIds = new Set(
-        openOrders.flatMap((order) => (order.clientOrderId ? [order.clientOrderId] : [])),
-      );
-      this.openExchangeOrderOids = new Set(openOrders.map((order) => order.orderId));
-
-      const openOrdersByClientOrderId = new Map<`0x${string}`, HyperliquidOpenOrder>();
-      for (const order of openOrders) {
-        if (order.clientOrderId) {
-          openOrdersByClientOrderId.set(order.clientOrderId, order);
-        }
-      }
-
-      const knownOrdersByClientOrderId = new Map<
-        `0x${string}`,
-        { position: BrokerPosition; kind: "entry" | "exit" | "stop"; order: TrackedPositionOrder }
-      >();
-      for (const position of this.openPositions.values()) {
-        this.hydrateTrackedExchangeOrderIds(position, openOrdersByClientOrderId);
-
-        for (const order of position.entryOrders) {
-          if (order.clientOrderId) {
-            knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "entry", order });
-          }
-        }
-
-        for (const order of position.exitOrders) {
-          if (order.clientOrderId) {
-            knownOrdersByClientOrderId.set(order.clientOrderId, { position, kind: "exit", order });
-          }
-        }
-
-        if (position.stopOrder?.clientOrderId) {
-          knownOrdersByClientOrderId.set(position.stopOrder.clientOrderId, {
-            position,
-            kind: "stop",
-            order: position.stopOrder,
-          });
-        }
-      }
+      this.applyOpenOrdersSnapshot(openOrders);
+      const knownOrdersByClientOrderId = this.buildKnownOrdersByClientOrderId();
 
       const unprocessedFills = fills
         .filter(
@@ -623,6 +911,9 @@ export class HyperliquidLiveBroker implements Broker {
       }
 
       this.lastSyncTime = syncStartedAt;
+      this.lastFullReconcileAt = syncStartedAt;
+      this.lastAccountStreamEventAt = syncStartedAt;
+      this.remoteStreamFailedReason = undefined;
       this.trimProcessedTradeIds();
       logs.push(...(await this.ensureProtectiveOrders()));
       await this.recordEquity(Object.fromEntries(this.lastMarks.entries()));
@@ -1000,7 +1291,15 @@ export class HyperliquidLiveBroker implements Broker {
       );
     }
 
-    logs.push(...(await this.syncRemoteState()));
+    if (this.usesWebsocketRuntime()) {
+      const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
+      logs.push(...(await this.drainRemoteEvents()));
+      if (!eventArrived) {
+        logs.push(...(await this.syncRemoteState()));
+      }
+    } else {
+      logs.push(...(await this.syncRemoteState()));
+    }
     return logs;
   }
 

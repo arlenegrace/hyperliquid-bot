@@ -3,6 +3,7 @@ export type TradeSide = "long" | "short";
 export type RangeSource = "manual";
 export type OrderStatus = "pending" | "filled" | "cancelled";
 export type ExecutionMode = "paper" | "live";
+export type RuntimeMode = "websocket" | "poll";
 export type MarginMode = "cross" | "isolated";
 export type LeverageSetting = number | "max";
 export type ActiveStrategyId =
@@ -118,6 +119,15 @@ export interface LiveTradingConfig {
   orderTimeoutMs: number;
 }
 
+export interface WebsocketRuntimeConfig {
+  candleCloseGraceMs: number;
+  candleBatchDebounceMs: number;
+  marketDataStaleMs: number;
+  accountDataStaleMs: number;
+  safetyReconcileMs: number;
+  postWriteEventWaitMs: number;
+}
+
 export interface StrategySignal {
   strategyId: string;
   symbol: string;
@@ -151,6 +161,8 @@ export interface BotConfig {
   interval: CandleInterval;
   watchlist: string[];
   pollIntervalMs: number;
+  runtimeMode: RuntimeMode;
+  websocket: WebsocketRuntimeConfig;
   executionMode: ExecutionMode;
   activeStrategyId: ActiveStrategyId;
   rangeLookbackCandles: number;

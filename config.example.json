@@ -2,6 +2,15 @@
   "apiBaseUrl": "https://api.hyperliquid.xyz",
   "watchlist": ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
   "pollIntervalMs": 3600000,
+  "runtimeMode": "websocket",
+  "websocket": {
+    "candleCloseGraceMs": 10000,
+    "candleBatchDebounceMs": 5000,
+    "marketDataStaleMs": 300000,
+    "accountDataStaleMs": 300000,
+    "safetyReconcileMs": 14400000,
+    "postWriteEventWaitMs": 2000
+  },
   "executionMode": "paper",
   "activeStrategyId": "manual-range-trading-v1",
   "rangeLookbackCandles": 500,
