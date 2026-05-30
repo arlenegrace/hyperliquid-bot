@@ -139,6 +139,7 @@ test("loadConfig accepts max leverage and keeps cross margin by default", () => 
   withEnv(
     {
       EXECUTION_MODE: "live",
+      ACTIVE_STRATEGY: undefined,
       HL_PRIVATE_KEY: LIVE_PRIVATE_KEY,
       HL_ACCOUNT_ADDRESS: LIVE_ACCOUNT_ADDRESS,
       LIVE_DEFAULT_LEVERAGE: "max",
@@ -146,7 +147,7 @@ test("loadConfig accepts max leverage and keeps cross margin by default", () => 
     },
     () => {
       const config = loadConfig();
-      assert.equal(config.activeStrategyId, "manual-range-trading-v1");
+      assert.equal(config.activeStrategyId, "manual-range-trading-v3");
       assert.equal(config.live.defaultLeverage, "max");
       assert.equal(config.live.marginMode, "cross");
     },

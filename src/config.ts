@@ -169,7 +169,7 @@ const defaultConfig: FullConfig = {
     postWriteEventWaitMs: 2_000,
   },
   executionMode: "paper",
-  activeStrategyId: "manual-range-trading-v1",
+  activeStrategyId: "manual-range-trading-v3",
   rangeLookbackCandles: 500,
   paperStartingBalanceUsd: 10_000,
   positionSizeUsd: 20,

@@ -29,9 +29,9 @@ Instead of placing one large order at a single price, the bot spreads entries an
 
 ## Strategies
 
-The active strategy is configured in `config.json` via `activeStrategyId`. The **default is `manual-range-trading-v1`**.
+The active strategy is configured in `config.json` via `activeStrategyId`. The **default is `manual-range-trading-v3`**.
 
-### `manual-range-trading-v1` *(default)*
+### `manual-range-trading-v1`
 
 - Reads range levels from `manual-ranges.json`.
 - Waits for a candle to close outside the range, then waits for a later candle to close back inside.
@@ -45,9 +45,10 @@ Use this strategy when you want a simple, predictable dollar amount per trade.
 - Same reclaim logic as v1.
 - Sizes positions based on **stop-defined risk** — the position size is calculated so that hitting the stop loses a fixed percentage of account equity, rather than a fixed dollar amount.
 
-### `manual-range-trading-v3`
+### `manual-range-trading-v3` *(default)*
 
-- Extends v2 with additional filters and refinements.
+- Same reclaim logic and fixed sizing as v1.
+- Stop uses the excursion extreme (lowest low / highest high) since the last close inside the range, not just the deviation candle.
 
 ### `manual-range-trading` *(legacy)*
 
@@ -148,7 +149,7 @@ This simulates trades with no real money using your configured starting balance.
 ```json
 {
   "executionMode": "live",
-  "activeStrategyId": "manual-range-trading-v1",
+  "activeStrategyId": "manual-range-trading-v3",
   "positionSizeUsd": 20,
   "live": {
     "enabled": false,
@@ -198,7 +199,7 @@ All settings live in `config.json` (copy from `config.example.json`).
     "postWriteEventWaitMs": 2000
   },
   "executionMode": "paper",
-  "activeStrategyId": "manual-range-trading-v1",
+  "activeStrategyId": "manual-range-trading-v3",
   "paperStartingBalanceUsd": 20,
   "positionSizeUsd": 100,
   "live": {
@@ -230,7 +231,7 @@ All settings live in `config.json` (copy from `config.example.json`).
 | `runtimeMode`             | `"websocket"` for event-driven watch mode, `"poll"` for rollback |
 | `pollIntervalMs`          | REST polling cadence when `runtimeMode` is `"poll"`        |
 | `executionMode`           | `"paper"` for simulation, `"live"` for real trading        |
-| `activeStrategyId`        | Which strategy to run (default: `manual-range-trading-v1`) |
+| `activeStrategyId`        | Which strategy to run (default: `manual-range-trading-v3`) |
 | `positionSizeUsd`         | Fixed dollar amount per trade (used by v1)                 |
 | `live.enabled`            | Master kill-switch for real exchange writes                |
 | `live.dryRun`             | Validates the live path without placing orders             |
