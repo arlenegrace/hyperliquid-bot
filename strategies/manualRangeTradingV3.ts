@@ -10,7 +10,7 @@ import type {
   StrategyResult,
   TradingStrategy,
 } from "../src/types.js";
-import { buildRangeEntryOrders, buildRangeExitOrders } from "./ladderUtils.js";
+import { buildRangeExitOrders, buildReclaimEntryOrders } from "./ladderUtils.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
@@ -75,10 +75,7 @@ export class ManualRangeTradingV3Strategy implements TradingStrategy {
       signalIndex,
       reclaimEvent.deviationCandle,
     );
-    const entryBandWidth = range.width * context.config.ladderEntryBandPct;
-
     if (reclaimEvent.side === "long") {
-      const upperEntry = Math.min(signalCandle.close, range.low + entryBandWidth);
       const exitStart = range.low + range.width * context.config.ladderExitStartPct;
       const exitEnd = range.low + range.width * context.config.ladderExitEndPct;
 
@@ -92,7 +89,7 @@ export class ManualRangeTradingV3Strategy implements TradingStrategy {
           side: "long",
           entryReferencePrice: signalCandle.close,
           stopLoss: stopAnchor * (1 - context.config.stopBufferPct),
-          entryOrders: buildRangeEntryOrders("long", range.low, upperEntry, context.config.ladderLevels),
+          entryOrders: buildReclaimEntryOrders("long", range.low, range.high, range.width),
           exitOrders: buildRangeExitOrders("long", exitStart, exitEnd, context.config.ladderLevels),
           range,
           triggerCandle: signalCandle,
@@ -106,7 +103,6 @@ export class ManualRangeTradingV3Strategy implements TradingStrategy {
       };
     }
 
-    const lowerEntry = Math.max(signalCandle.close, range.high - entryBandWidth);
     const exitStart = range.high - range.width * context.config.ladderExitStartPct;
     const exitEnd = range.high - range.width * context.config.ladderExitEndPct;
 
@@ -120,7 +116,7 @@ export class ManualRangeTradingV3Strategy implements TradingStrategy {
         side: "short",
         entryReferencePrice: signalCandle.close,
         stopLoss: stopAnchor * (1 + context.config.stopBufferPct),
-        entryOrders: buildRangeEntryOrders("short", lowerEntry, range.high, context.config.ladderLevels),
+        entryOrders: buildReclaimEntryOrders("short", range.low, range.high, range.width),
         exitOrders: buildRangeExitOrders("short", exitStart, exitEnd, context.config.ladderLevels),
         range,
         triggerCandle: signalCandle,

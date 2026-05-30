@@ -45,6 +45,7 @@ const websocketConfigSchema = z
     accountDataStaleMs: z.coerce.number().int().min(60_000).optional(),
     safetyReconcileMs: z.coerce.number().int().min(0).optional(),
     postWriteEventWaitMs: z.coerce.number().int().min(0).max(30_000).optional(),
+    protectiveOrdersDebounceMs: z.coerce.number().int().min(0).max(60_000).optional(),
   })
   .strict();
 
@@ -107,6 +108,7 @@ const fullConfigSchema = z.object({
     accountDataStaleMs: true,
     safetyReconcileMs: true,
     postWriteEventWaitMs: true,
+    protectiveOrdersDebounceMs: true,
   }),
   executionMode: z.enum(["paper", "live"]),
   activeStrategyId: activeStrategyIdSchema,
@@ -167,6 +169,7 @@ const defaultConfig: FullConfig = {
     accountDataStaleMs: 5 * 60_000,
     safetyReconcileMs: 4 * 60 * 60_000,
     postWriteEventWaitMs: 2_000,
+    protectiveOrdersDebounceMs: 2_000,
   },
   executionMode: "paper",
   activeStrategyId: "manual-range-trading-v3",
@@ -352,6 +355,14 @@ function legacyEnvPatch(env: NodeJS.ProcessEnv): ConfigPatch {
       .min(0)
       .max(30_000)
       .parse(env.WS_POST_WRITE_EVENT_WAIT_MS);
+  }
+  if (env.WS_PROTECTIVE_ORDERS_DEBOUNCE_MS !== undefined && env.WS_PROTECTIVE_ORDERS_DEBOUNCE_MS !== "") {
+    websocket.protectiveOrdersDebounceMs = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(60_000)
+      .parse(env.WS_PROTECTIVE_ORDERS_DEBOUNCE_MS);
   }
   if (Object.keys(websocket).length > 0) {
     patch.websocket = websocket;

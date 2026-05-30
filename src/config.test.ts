@@ -94,6 +94,7 @@ test("loadConfig parses websocket runtime settings", () => {
       WS_ACCOUNT_DATA_STALE_MS: "700000",
       WS_SAFETY_RECONCILE_MS: "0",
       WS_POST_WRITE_EVENT_WAIT_MS: "3000",
+      WS_PROTECTIVE_ORDERS_DEBOUNCE_MS: "1500",
     },
     () => {
       const config = loadConfig();
@@ -104,6 +105,7 @@ test("loadConfig parses websocket runtime settings", () => {
       assert.equal(config.websocket.accountDataStaleMs, 700_000);
       assert.equal(config.websocket.safetyReconcileMs, 0);
       assert.equal(config.websocket.postWriteEventWaitMs, 3_000);
+      assert.equal(config.websocket.protectiveOrdersDebounceMs, 1_500);
     },
   );
 });

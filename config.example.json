@@ -9,7 +9,8 @@
     "marketDataStaleMs": 300000,
     "accountDataStaleMs": 300000,
     "safetyReconcileMs": 14400000,
-    "postWriteEventWaitMs": 2000
+    "postWriteEventWaitMs": 2000,
+    "protectiveOrdersDebounceMs": 2000
   },
   "executionMode": "paper",
   "activeStrategyId": "manual-range-trading-v3",

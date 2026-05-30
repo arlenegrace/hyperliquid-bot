@@ -153,6 +153,8 @@ export class HyperliquidLiveBroker implements Broker {
   /** Latest `allTime` portfolio PnL from the exchange (prepareSnapshot). */
   private portfolioAllTimePnlUsd = 0;
   private nextProtectiveOrderSequence = 1;
+  private protectiveOrdersDebounceTimer?: ReturnType<typeof setTimeout>;
+  private protectiveOrdersDebounceWaiters: Array<(logs: string[]) => void> = [];
 
   constructor(
     private readonly config: BotConfig,
@@ -193,22 +195,11 @@ export class HyperliquidLiveBroker implements Broker {
       );
     }
 
-    const leverageLogs: string[] = [];
-    for (const symbol of this.config.watchlist) {
-      const appliedLeverage = await this.gateway.ensureLeverage(
-        symbol,
-        this.config.live.defaultLeverage,
-        this.config.live.marginMode,
-      );
-      leverageLogs.push(`${symbol}: configured ${this.config.live.marginMode} ${appliedLeverage}x leverage.`);
-    }
-
     this.initialized = true;
     await this.saveState();
 
     return [
       `live broker initialized for ${wrapOrange(this.accountAddress)} using ${this.config.live.marginMode} margin.`,
-      ...leverageLogs,
       this.config.live.dryRun
         ? "dry-run mode is active; exchange writes are disabled."
         : this.config.live.enabled
@@ -1056,6 +1047,33 @@ export class HyperliquidLiveBroker implements Broker {
   }
 
   private async ensureProtectiveOrders(): Promise<string[]> {
+    const debounceMs = this.config.websocket.protectiveOrdersDebounceMs;
+    if (debounceMs <= 0) {
+      return this.runEnsureProtectiveOrders();
+    }
+
+    return new Promise((resolve) => {
+      this.protectiveOrdersDebounceWaiters.push(resolve);
+      if (this.protectiveOrdersDebounceTimer) {
+        clearTimeout(this.protectiveOrdersDebounceTimer);
+      }
+
+      this.protectiveOrdersDebounceTimer = setTimeout(() => {
+        this.protectiveOrdersDebounceTimer = undefined;
+        void this.flushDebouncedProtectiveOrders();
+      }, debounceMs);
+    });
+  }
+
+  private async flushDebouncedProtectiveOrders(): Promise<void> {
+    const waiters = this.protectiveOrdersDebounceWaiters.splice(0);
+    const logs = await this.runEnsureProtectiveOrders();
+    for (const resolve of waiters) {
+      resolve(logs);
+    }
+  }
+
+  private async runEnsureProtectiveOrders(): Promise<string[]> {
     const logs: string[] = [];
     if (!this.writesEnabled()) {
       return logs;
@@ -1072,6 +1090,10 @@ export class HyperliquidLiveBroker implements Broker {
     return logs;
   }
 
+  private getStopTargetSizeUnits(position: BrokerPosition): number {
+    return position.intendedSizeUnits;
+  }
+
   private async ensureProtectiveOrdersForPosition(position: BrokerPosition): Promise<string[]> {
     const logs: string[] = [];
     const protectivePlacements: Array<{
@@ -1080,9 +1102,10 @@ export class HyperliquidLiveBroker implements Broker {
     }> = [];
     const assetInfo = this.gateway.getAssetInfo(position.symbol);
 
+    const stopTargetSizeUnits = this.getStopTargetSizeUnits(position);
     const desiredStop = {
       price: position.stopLoss,
-      sizeUnits: position.remainingSizeUnits,
+      sizeUnits: stopTargetSizeUnits,
     };
 
     if (!position.stopOrder) {

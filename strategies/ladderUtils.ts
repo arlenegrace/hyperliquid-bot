@@ -22,6 +22,9 @@ export function buildEqualLadder(
   }));
 }
 
+export const RECLAIM_ENTRY_LADDER_LEVELS = 2;
+export const RECLAIM_ENTRY_BAND_PCT = 0.05;
+
 export function buildRangeEntryOrders(
   side: TradeSide,
   edgeLow: number,
@@ -31,6 +34,19 @@ export function buildRangeEntryOrders(
   return side === "long"
     ? buildEqualLadder("Entry", edgeHigh, edgeLow, levels)
     : buildEqualLadder("Entry", edgeLow, edgeHigh, levels);
+}
+
+/** Two equal entry legs: one at the range edge and one 5% of range width inward. */
+export function buildReclaimEntryOrders(
+  side: TradeSide,
+  rangeLow: number,
+  rangeHigh: number,
+  rangeWidth: number,
+): LadderLevelPlan[] {
+  const bandOffset = rangeWidth * RECLAIM_ENTRY_BAND_PCT;
+  return side === "long"
+    ? buildRangeEntryOrders("long", rangeLow, rangeLow + bandOffset, RECLAIM_ENTRY_LADDER_LEVELS)
+    : buildRangeEntryOrders("short", rangeHigh - bandOffset, rangeHigh, RECLAIM_ENTRY_LADDER_LEVELS);
 }
 
 export function buildRangeExitOrders(

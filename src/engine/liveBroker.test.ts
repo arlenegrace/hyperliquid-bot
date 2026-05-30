@@ -24,6 +24,7 @@ function createConfig(): BotConfig {
       accountDataStaleMs: 300_000,
       safetyReconcileMs: 14_400_000,
       postWriteEventWaitMs: 2_000,
+      protectiveOrdersDebounceMs: 0,
     },
     executionMode: "live",
     activeStrategyId: "manual-range-trading-v2",
@@ -169,6 +170,32 @@ test("live broker replaces a resized stop with a fresh client order id", async (
   assert.equal(position.stopOrder?.clientOrderId, replacementStop.clientOrderId);
   assert.equal(position.stopOrder?.sizeUnits, 2);
   assert.match(logs.join("\n"), /cancelled 1 exchange order/);
+});
+
+test("live broker skips stop replacement when stop already covers intended size after a partial fill", async () => {
+  const stopClientOrderId = "0x33333333333333333333333333333333" as const;
+  const { broker, cancelCalls, placementCalls } = createBrokerHarness();
+  const position = createOpenPosition({
+    intendedSizeUnits: 2,
+    filledSizeUnits: 1,
+    remainingSizeUnits: 1,
+    stopOrder: {
+      price: 95,
+      sizeUnits: 2,
+      status: "pending",
+      clientOrderId: stopClientOrderId,
+      exchangeOrderId: 789,
+    },
+  });
+
+  broker.openExchangeOrderIds = new Set([stopClientOrderId]);
+  broker.openExchangeOrderOids = new Set([789]);
+
+  await broker.ensureProtectiveOrdersForPosition(position);
+
+  assert.equal(cancelCalls.length, 0);
+  assert.equal(placementCalls.length, 0);
+  assert.equal(position.stopOrder?.sizeUnits, 2);
 });
 
 test("live broker skips stop replacement when the existing stop cancel fails", async () => {

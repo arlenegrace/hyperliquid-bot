@@ -126,6 +126,7 @@ export interface WebsocketRuntimeConfig {
   accountDataStaleMs: number;
   safetyReconcileMs: number;
   postWriteEventWaitMs: number;
+  protectiveOrdersDebounceMs: number;
 }
 
 export interface StrategySignal {

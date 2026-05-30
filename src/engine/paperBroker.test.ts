@@ -20,6 +20,7 @@ function createConfig(): BotConfig {
       accountDataStaleMs: 300_000,
       safetyReconcileMs: 14_400_000,
       postWriteEventWaitMs: 2_000,
+      protectiveOrdersDebounceMs: 2_000,
     },
     executionMode: "paper",
     activeStrategyId: "manual-range-trading-v2",
