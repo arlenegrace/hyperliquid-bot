@@ -158,8 +158,39 @@ function allocateEvenSizeSteps(totalSizeSteps: number, orderCount: number): numb
   const leftoverSteps = totalSizeSteps - baseStepsPerOrder * orderCount;
 
   return Array.from({ length: orderCount }, (_, index) =>
-    index === 0 ? baseStepsPerOrder + leftoverSteps : baseStepsPerOrder,
+    index === orderCount - 1 ? baseStepsPerOrder + leftoverSteps : baseStepsPerOrder,
   );
+}
+
+/** Adds any unallocated size-quantum remainder to the last active take-profit slice. */
+export function absorbExitAllocationRemainder(
+  allocations: number[],
+  totalSizeUnits: number,
+  sizeDecimals: number,
+): number[] {
+  const sizeFactor = 10 ** sizeDecimals;
+  const allocatedTotal = allocations.reduce((sum, size) => sum + size, 0);
+  const shortfall = totalSizeUnits - allocatedTotal;
+  if (shortfall <= POSITION_EPSILON) {
+    return allocations;
+  }
+
+  let lastActiveIndex = -1;
+  for (let index = allocations.length - 1; index >= 0; index -= 1) {
+    if ((allocations[index] ?? 0) > POSITION_EPSILON) {
+      lastActiveIndex = index;
+      break;
+    }
+  }
+
+  if (lastActiveIndex < 0) {
+    return allocations;
+  }
+
+  const extraSteps = Math.ceil(shortfall * sizeFactor - POSITION_EPSILON);
+  const next = [...allocations];
+  next[lastActiveIndex] = (next[lastActiveIndex] ?? 0) + extraSteps / sizeFactor;
+  return next;
 }
 
 export function allocatePrioritizedExitOrderTargets({
@@ -190,7 +221,10 @@ export function allocatePrioritizedExitOrderTargets({
       continue;
     }
 
-    return exitPrices.map((_, index) => (index < activeOrderCount ? allocatedSteps[index]! / sizeFactor : 0));
+    const allocations = exitPrices.map((_, index) =>
+      index < activeOrderCount ? allocatedSteps[index]! / sizeFactor : 0,
+    );
+    return absorbExitAllocationRemainder(allocations, totalSizeUnits, sizeDecimals);
   }
 
   return exitPrices.map(() => 0);

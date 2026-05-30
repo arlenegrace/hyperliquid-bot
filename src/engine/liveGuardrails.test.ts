@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  absorbExitAllocationRemainder,
   allocateEntryOrderSizeUnits,
   allocatePrioritizedExitOrderTargets,
   buildPlannedEntryOrders,
@@ -129,7 +130,7 @@ test("allocatePrioritizedExitOrderTargets keeps five fractional take-profit orde
   assert.deepEqual(targets, [3.4, 3.4, 3.4, 3.4, 3.4]);
 });
 
-test("allocatePrioritizedExitOrderTargets pushes any precision remainder into the first take-profit order", () => {
+test("allocatePrioritizedExitOrderTargets pushes any precision remainder into the last take-profit order", () => {
   const targets = allocatePrioritizedExitOrderTargets({
     totalSizeUnits: 17.1,
     exitPrices: [1.45, 1.46, 1.47, 1.48, 1.49],
@@ -137,7 +138,13 @@ test("allocatePrioritizedExitOrderTargets pushes any precision remainder into th
     minOrderNotionalUsd: 0,
   });
 
-  assert.deepEqual(targets, [3.5, 3.4, 3.4, 3.4, 3.4]);
+  assert.deepEqual(targets, [3.4, 3.4, 3.4, 3.4, 3.5]);
+});
+
+test("absorbExitAllocationRemainder adds exchange step remainder to the last active take-profit slice", () => {
+  const targets = absorbExitAllocationRemainder([3.4, 3.4, 3.4, 3.4, 3.4], 17.14, 1);
+
+  assert.deepEqual(targets, [3.4, 3.4, 3.4, 3.4, 3.6]);
 });
 
 test("allocatePrioritizedExitOrderTargets drops only the highest-priority tail orders when minimum notional blocks all five", () => {

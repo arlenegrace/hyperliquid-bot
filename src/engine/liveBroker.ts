@@ -1149,20 +1149,47 @@ export class HyperliquidLiveBroker implements Broker {
       }
     }
 
+    const exitFilledSizeUnits = position.exitOrders.reduce(
+      (sum, order) => sum + (order.filledSizeUnits ?? 0),
+      0,
+    );
+    const exitCoverageTargetUnits = position.remainingSizeUnits + exitFilledSizeUnits;
     const desiredExitSizeUnits = allocatePrioritizedExitOrderTargets({
-      totalSizeUnits: position.filledSizeUnits,
+      totalSizeUnits: exitCoverageTargetUnits,
       exitPrices: position.exitOrders.map((order) => order.price),
       sizeDecimals: assetInfo.szDecimals,
       minOrderNotionalUsd: MIN_TAKE_PROFIT_ORDER_NOTIONAL_USD,
     });
+    const desiredOpenSizeUnits = position.exitOrders.map((order, index) =>
+      Math.max(0, (desiredExitSizeUnits[index] ?? 0) - (order.filledSizeUnits ?? 0)),
+    );
+    let lastOpenExitIndex = -1;
+    for (let index = desiredOpenSizeUnits.length - 1; index >= 0; index -= 1) {
+      if ((desiredOpenSizeUnits[index] ?? 0) > POSITION_EPSILON) {
+        lastOpenExitIndex = index;
+        break;
+      }
+    }
+    if (lastOpenExitIndex >= 0) {
+      const otherOpenExitSizeUnits = desiredOpenSizeUnits.reduce(
+        (sum, sizeUnits, index) => (index === lastOpenExitIndex ? sum : sum + sizeUnits),
+        0,
+      );
+      desiredOpenSizeUnits[lastOpenExitIndex] = Math.max(
+        desiredOpenSizeUnits[lastOpenExitIndex] ?? 0,
+        position.remainingSizeUnits - otherOpenExitSizeUnits,
+      );
+      desiredExitSizeUnits[lastOpenExitIndex] =
+        (position.exitOrders[lastOpenExitIndex]?.filledSizeUnits ?? 0) + desiredOpenSizeUnits[lastOpenExitIndex]!;
+    }
 
     for (const [index, order] of position.exitOrders.entries()) {
       const desiredTotalSizeUnits = desiredExitSizeUnits[index] ?? 0;
-      const desiredOpenSizeUnits = Math.max(0, desiredTotalSizeUnits - (order.filledSizeUnits ?? 0));
+      const desiredOpenSize = desiredOpenSizeUnits[index] ?? 0;
       const currentOutstandingSizeUnits = Math.max(0, order.sizeUnits - (order.filledSizeUnits ?? 0));
       const orderIsOpen = this.isOrderOpenOnExchange(order);
 
-      if (desiredOpenSizeUnits <= POSITION_EPSILON) {
+      if (desiredOpenSize <= POSITION_EPSILON) {
         if (orderIsOpen) {
           const cancelResult = await this.cancelExchangeOrdersForPosition(position, { exitOrderIndexes: [index] });
           logs.push(...cancelResult.logs);
@@ -1184,7 +1211,7 @@ export class HyperliquidLiveBroker implements Broker {
 
       const needsReplace =
         !isSameNumber(order.sizeUnits, desiredTotalSizeUnits) ||
-        !isSameNumber(currentOutstandingSizeUnits, desiredOpenSizeUnits) ||
+        !isSameNumber(currentOutstandingSizeUnits, desiredOpenSize) ||
         !order.clientOrderId ||
         !orderIsOpen;
 
@@ -1212,7 +1239,7 @@ export class HyperliquidLiveBroker implements Broker {
       delete order.exchangeOrderId;
       const clientOrderId = this.buildProtectiveClientOrderId(
         position.id,
-        `tp-${index}-${desiredOpenSizeUnits.toFixed(8)}-${order.price.toFixed(8)}`,
+        `tp-${index}-${desiredOpenSize.toFixed(8)}-${order.price.toFixed(8)}`,
       );
       order.clientOrderId = clientOrderId;
       protectivePlacements.push({
@@ -1221,7 +1248,7 @@ export class HyperliquidLiveBroker implements Broker {
           symbol: position.symbol,
           side: oppositeTradeSide(position.side),
           price: order.price,
-          sizeUnits: desiredOpenSizeUnits,
+          sizeUnits: desiredOpenSize,
           reduceOnly: true,
           tif: "Gtc",
           clientOrderId,
