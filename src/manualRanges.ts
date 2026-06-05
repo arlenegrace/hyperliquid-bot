@@ -145,6 +145,13 @@ export function createManualRangeFingerprint(range: ManualRangeDefinition): stri
   ].join("|");
 }
 
+export function getManualRangeMapFingerprint(ranges: ManualRangeMap): string {
+  return Object.values(ranges)
+    .sort((left, right) => left.symbol.localeCompare(right.symbol))
+    .map((range) => createManualRangeFingerprint(range))
+    .join("||");
+}
+
 export function buildManualRangeSnapshot(
   range: ManualRangeDefinition,
   referenceTime: number,

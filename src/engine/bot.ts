@@ -9,9 +9,10 @@ import {
   normalizeConsoleMessage,
   wrapRed,
 } from "../consoleFormat.js";
-import type { BotConfig, Candle, TradingStrategy } from "../types.js";
+import type { BotConfig, Candle, ManualRangeDefinition, ManualRangeState, TradingStrategy } from "../types.js";
 import {
   applyManualRangeInvalidation,
+  getManualRangeMapFingerprint,
   loadManualRangeStates,
   getManualRangeForSymbol,
   loadManualRanges,
@@ -22,10 +23,13 @@ import {
 } from "../manualRanges.js";
 import type { Broker } from "./broker.js";
 
+type ManualRangeReloadTrigger = "poll-cycle" | "websocket-4h-candle";
+
 export class TradingBot {
   private readonly lastProcessedCloseTimeBySymbol = new Map<string, number>();
-  private readonly manualRangeStates = new Map<string, import("../types.js").ManualRangeState>();
+  private readonly manualRangeStates = new Map<string, ManualRangeState>();
   private manualRangeStatesLoaded = false;
+  private lastLoadedManualRangeFingerprint: string | undefined;
 
   constructor(
     private readonly config: BotConfig,
@@ -36,13 +40,12 @@ export class TradingBot {
 
   async runOnce(): Promise<void> {
     await this.ensureManualRangeStatesLoaded();
-    const manualRanges = await loadManualRanges(this.config.manualRangeFile);
+    const manualRanges = await this.reloadManualRanges("poll-cycle");
     for (const logLine of await this.broker.onCycleStart()) {
       console.log(`[broker] ${logLine}`);
     }
 
     console.log(`[bot] Starting scan for ${formatConsoleSymbolListGreen(this.config.watchlist)} on ${this.config.interval} candles.`);
-    console.log(`[bot] Loaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`);
 
     for (const symbol of this.config.watchlist) {
       await this.processSymbolFromRest(symbol, manualRanges);
@@ -54,7 +57,7 @@ export class TradingBot {
 
   async runForClosedCandles(candlesBySymbol: Map<string, Candle[]>): Promise<void> {
     await this.ensureManualRangeStatesLoaded();
-    const manualRanges = await loadManualRanges(this.config.manualRangeFile);
+    const manualRanges = await this.reloadManualRanges("websocket-4h-candle");
     for (const logLine of await this.broker.onCycleStart()) {
       console.log(`[broker] ${logLine}`);
     }
@@ -65,7 +68,6 @@ export class TradingBot {
     }
 
     console.log(`[bot] Processing websocket candle close for ${formatConsoleSymbolListGreen(symbols)}.`);
-    console.log(`[bot] Loaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`);
 
     for (const symbol of symbols) {
       const candles = candlesBySymbol.get(symbol);
@@ -112,6 +114,12 @@ export class TradingBot {
 
       const lastProcessedCloseTime = this.lastProcessedCloseTimeBySymbol.get(symbol);
       if (lastProcessedCloseTime === latestClosedCandle.closeTime) {
+        if (manualRange && manualRangeState) {
+          this.persistReloadedManualRangeState(symbol, manualRange, manualRangeState);
+        } else if (!manualRange) {
+          this.manualRangeStates.delete(symbol);
+        }
+
         if (manualRangeState?.isInvalidated) {
           console.log(`${formatConsoleLabel(symbol)} ${wrapRed("Range has been invalidated.")}`);
         } else {
@@ -200,6 +208,42 @@ export class TradingBot {
     const snapshot = this.broker.snapshot();
     console.log(
       `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.unrealizedPnlUsd, { suffix: " USD" })}, all time PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.allTimePnlUsd, { suffix: "" })}, account equity: $${snapshot.equityUsd.toFixed(2)}.`,
+    );
+  }
+
+  private async reloadManualRanges(trigger: ManualRangeReloadTrigger): Promise<ManualRangeMap> {
+    const manualRanges = await loadManualRanges(this.config.manualRangeFile);
+    const fingerprint = getManualRangeMapFingerprint(manualRanges);
+    const triggerLabel = trigger === "websocket-4h-candle" ? "4h websocket candle close" : "poll cycle";
+
+    console.log(
+      `[bot] Reloaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile} (${triggerLabel}).`,
+    );
+
+    if (
+      this.lastLoadedManualRangeFingerprint !== undefined &&
+      this.lastLoadedManualRangeFingerprint !== fingerprint
+    ) {
+      console.log("[bot] Manual range definitions changed since the previous reload.");
+    }
+
+    this.lastLoadedManualRangeFingerprint = fingerprint;
+    return manualRanges;
+  }
+
+  private persistReloadedManualRangeState(
+    symbol: string,
+    manualRange: ManualRangeDefinition,
+    manualRangeState: ManualRangeState,
+  ): void {
+    const previousState = this.manualRangeStates.get(symbol);
+    if (previousState?.fingerprint === manualRangeState.fingerprint) {
+      return;
+    }
+
+    this.manualRangeStates.set(symbol, manualRangeState);
+    console.log(
+      `${formatConsoleLabel(symbol)} Manual range reloaded (${formatPerpPriceForConsole(manualRange.rangeLow)} - ${formatPerpPriceForConsole(manualRange.rangeHigh)}).`,
     );
   }
 

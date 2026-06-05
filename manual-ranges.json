@@ -2,22 +2,29 @@
   "ranges": [
     {
       "symbol": "BTC",
-      "rangeLow": 65097,
+      "rangeLow": 62468,
       "rangeHigh": 72271,
-      "validFromTime": "2026-02-12T20:00:00.000Z",
+      "validFromTime": "2026-06-05T05:00:00.000Z",
       "notes": "Based on Feb 8 high and Feb 12 low."
     },
     {
+      "symbol": "SOL",
+      "rangeLow": 67.520,
+      "rangeHigh": 89.709,
+      "validFromTime": "2026-06-05T05:00:00.000Z",
+      "notes": "SOL range based on the Feb 6 high and Feb 12 low."
+    },
+    {
       "symbol": "ETH",
-      "rangeLow": 1896.7,
+      "rangeLow": 1740.7,
       "rangeHigh": 2149.7,
-      "validFromTime": "2026-02-12T20:00:00.000Z",
+      "validFromTime": "2026-06-05T05:00:00.000Z",
       "notes": "Based on Feb 8 high and Feb 12 low."
     },
     {
       "symbol": "CRV",
       "rangeLow": 0.20373,
-      "rangeHigh": 0.264,
+      "rangeHigh": 0.26400,
       "validFromTime": "2026-02-11T12:00:00.000Z",
       "notes": "CRV range: Feb 6 16:00 UTC high and Feb 11 12:00 UTC low."
     },
@@ -30,9 +37,9 @@
     },
     {
       "symbol": "XRP",
-      "rangeLow": 1.3413,
+      "rangeLow": 1.1187,
       "rangeHigh": 1.5412,
-      "validFromTime": "2026-02-11T16:00:00.000Z",
+      "validFromTime": "2026-06-05T05:00:00.000Z",
       "notes": "XRP range: Feb 6 12:00 UTC high and Feb 11 16:00 UTC low."
     },
     {
