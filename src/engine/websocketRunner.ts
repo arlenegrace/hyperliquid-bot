@@ -10,10 +10,17 @@ import type { Broker } from "./broker.js";
 import { HyperliquidLiveBroker } from "./liveBroker.js";
 import { TradingBot } from "./bot.js";
 
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+
+export function getDelayUntilNextCandleCloseGrace(now: number, graceMs: number): number {
+  const nextCloseTime = Math.ceil((now + 1) / FOUR_HOURS_MS) * FOUR_HOURS_MS - 1;
+  return Math.max(0, nextCloseTime + graceMs - now);
+}
+
 export class WebsocketRunner {
   private readonly candleStore: CandleStore;
   private readonly subscriptionGateway: HyperliquidSubscriptionGateway;
-  private flushTimer: ReturnType<typeof setTimeout> | undefined;
+  private candleCloseTimer: ReturnType<typeof setTimeout> | undefined;
   private staleTimer: ReturnType<typeof setInterval> | undefined;
   private processing = false;
   private stopping = false;
@@ -38,10 +45,11 @@ export class WebsocketRunner {
   async start(): Promise<void> {
     await this.bootstrapCandles();
     await this.subscribeStreams();
+    this.scheduleNextCandleClose();
     this.startStalenessMonitor();
 
     console.log(
-      `[boot] Websocket runtime active for ${formatConsoleSymbolListGreen(this.config.watchlist)}; REST is now reserved for bootstrap, reconnect recovery, write fallback, and sparse safety reconciliation.`,
+      `[boot] Websocket runtime active for ${formatConsoleSymbolListGreen(this.config.watchlist)}; REST confirms each 4h candle after a ${this.config.websocket.candleCloseGraceMs}ms close grace.`,
     );
 
     await new Promise<void>((resolve) => {
@@ -51,8 +59,8 @@ export class WebsocketRunner {
         }
 
         this.stopping = true;
-        if (this.flushTimer) {
-          clearTimeout(this.flushTimer);
+        if (this.candleCloseTimer) {
+          clearTimeout(this.candleCloseTimer);
         }
         if (this.staleTimer) {
           clearInterval(this.staleTimer);
@@ -95,7 +103,6 @@ export class WebsocketRunner {
       this.config.interval,
       (candle) => {
         this.candleStore.upsertFromStream(candle);
-        this.scheduleFlush();
       },
       (feed, reason) => {
         console.error(`[ws] ${feed} subscription failed: ${reason instanceof Error ? reason.message : String(reason)}`);
@@ -117,42 +124,50 @@ export class WebsocketRunner {
     }
   }
 
-  private scheduleFlush(): void {
+  private scheduleNextCandleClose(now = Date.now()): void {
     if (this.stopping) {
       return;
     }
 
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
+    if (this.candleCloseTimer) {
+      clearTimeout(this.candleCloseTimer);
     }
 
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = undefined;
-      void this.flushClosedCandles();
-    }, this.config.websocket.candleBatchDebounceMs);
+    this.candleCloseTimer = setTimeout(() => {
+      this.candleCloseTimer = undefined;
+      void this.processConfirmedClosedCandles();
+    }, getDelayUntilNextCandleCloseGrace(now, this.config.websocket.candleCloseGraceMs));
   }
 
-  private async flushClosedCandles(): Promise<void> {
+  private async processConfirmedClosedCandles(): Promise<void> {
     if (this.processing) {
-      this.scheduleFlush();
-      return;
-    }
-
-    const ready = this.candleStore.collectNewClosedCandles();
-    if (ready.size === 0) {
+      this.scheduleNextCandleClose();
       return;
     }
 
     const candlesBySymbol = new Map<string, Candle[]>();
-    for (const symbol of ready.keys()) {
-      candlesBySymbol.set(symbol, this.candleStore.getCandles(symbol));
-    }
-
     this.processing = true;
     try {
+      for (const symbol of this.config.watchlist) {
+        const candles = await this.marketDataClient.fetchRecentClosedCandles(
+          symbol,
+          this.config.interval,
+          this.config.rangeLookbackCandles + 2,
+        );
+        this.candleStore.seed(symbol, candles);
+        candlesBySymbol.set(symbol, candles);
+      }
+
       await this.bot.runForClosedCandles(candlesBySymbol);
+      for (const [symbol, candles] of candlesBySymbol.entries()) {
+        const latest = candles.at(-1);
+        if (latest) {
+          this.candleStore.markProcessed(symbol, latest.closeTime);
+        }
+      }
     } finally {
       this.processing = false;
+      this.scheduleNextCandleClose();
     }
   }
 

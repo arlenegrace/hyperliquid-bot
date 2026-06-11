@@ -8,7 +8,7 @@
     "check": "tsx src/index.ts --once",
     "dev": "tsx src/index.ts",
     "start": "node dist/src/index.js",
-    "test": "node --test --import tsx src/config.test.ts src/engine/bot.test.ts src/engine/candleStore.test.ts src/engine/createBroker.test.ts src/engine/liveBroker.test.ts src/engine/liveGuardrails.test.ts src/engine/paperBroker.test.ts strategies/index.test.ts"
+    "test": "node --test --import tsx src/config.test.ts src/engine/bot.test.ts src/engine/candleStore.test.ts src/engine/createBroker.test.ts src/engine/liveBroker.test.ts src/engine/liveGuardrails.test.ts src/engine/paperBroker.test.ts src/engine/websocketRunner.test.ts strategies/index.test.ts"
   },
   "keywords": [
     "hyperliquid",

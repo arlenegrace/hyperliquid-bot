@@ -153,7 +153,7 @@ export class HyperliquidLiveBroker implements Broker {
   /** Latest `allTime` portfolio PnL from the exchange (prepareSnapshot). */
   private portfolioAllTimePnlUsd = 0;
   private nextProtectiveOrderSequence = 1;
-  private protectiveOrdersDebounceTimer?: ReturnType<typeof setTimeout>;
+  private protectiveOrdersDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   private protectiveOrdersDebounceWaiters: Array<(logs: string[]) => void> = [];
 
   constructor(
