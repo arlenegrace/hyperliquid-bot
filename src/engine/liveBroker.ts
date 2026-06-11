@@ -9,6 +9,7 @@ import {
   type HyperliquidAccountSnapshot,
   type HyperliquidFill,
   type HyperliquidOpenOrder,
+  type HyperliquidOrderPlacementResult,
   type HyperliquidPlaceOrderSpec,
 } from "../clients/hyperliquidExchange.js";
 import type { HyperliquidAccountStreamEvent, HyperliquidOrderUpdate } from "../clients/hyperliquidSubscriptions.js";
@@ -440,6 +441,25 @@ export class HyperliquidLiveBroker implements Broker {
     return knownOrdersByClientOrderId;
   }
 
+  private getActivePositionsForSymbol(symbol: string): BrokerPosition[] {
+    return [...this.openPositions.values()].filter(
+      (position) =>
+        position.symbol === symbol && position.status !== "closed" && position.status !== "cancelled",
+    );
+  }
+
+  private syncPositionTargetsFromActiveEntryOrders(position: BrokerPosition): void {
+    const activeEntrySizeUnits = position.entryOrders.reduce(
+      (sum, order) => (order.status === "cancelled" ? sum : sum + order.sizeUnits),
+      0,
+    );
+    position.intendedSizeUnits = activeEntrySizeUnits;
+
+    for (const order of position.exitOrders) {
+      order.sizeUnits = activeEntrySizeUnits * order.sizeFraction;
+    }
+  }
+
   async openPosition(signal: StrategySignal): Promise<string[]> {
     await this.assertInitialized();
     const logs: string[] = [];
@@ -488,6 +508,14 @@ export class HyperliquidLiveBroker implements Broker {
       return [
         ...logs,
         `${signal.symbol}: skipped live order because Hyperliquid websocket account state is stale; waiting for stream recovery or sparse reconciliation.`,
+      ];
+    }
+
+    const activeSymbolPositions = this.getActivePositionsForSymbol(signal.symbol);
+    if (activeSymbolPositions.length > 0) {
+      return [
+        ...logs,
+        `${signal.symbol}: skipped live order because active local position(s) already exist for this symbol: ${activeSymbolPositions.map((position) => position.id).join(", ")}.`,
       ];
     }
 
@@ -542,10 +570,31 @@ export class HyperliquidLiveBroker implements Broker {
       } satisfies HyperliquidPlaceOrderSpec;
     });
 
-    const results = await this.gateway.placeOrders(orderSpecs);
+    let results: HyperliquidOrderPlacementResult[];
+    try {
+      results = await this.gateway.placeOrders(orderSpecs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logs.push(
+        `${position.symbol}: entry placement failed before per-order statuses were confirmed: ${message}. Saving pending client order ids and reconciling with Hyperliquid.`,
+      );
+      await this.saveState();
+      logs.push(...(await this.syncRemoteState()));
+      return logs;
+    }
+
     for (const [index, result] of results.entries()) {
       const order = position.entryOrders[index];
       if (!order) {
+        continue;
+      }
+
+      if (result.status === "error") {
+        order.status = "cancelled";
+        delete order.exchangeOrderId;
+        logs.push(
+          `${position.symbol}: ${order.label} ${position.side} order for ${(order.sizeUnits * order.price).toFixed(2)} USD notional was rejected by Hyperliquid: ${result.error ?? "unknown exchange error"}.`,
+        );
         continue;
       }
 
@@ -555,6 +604,13 @@ export class HyperliquidLiveBroker implements Broker {
       logs.push(
         `${position.symbol}: submitted ${order.label} ${position.side} order for ${(order.sizeUnits * order.price).toFixed(2)} USD notional (${result.status}).`,
       );
+    }
+
+    this.syncPositionTargetsFromActiveEntryOrders(position);
+    if (position.intendedSizeUnits <= POSITION_EPSILON) {
+      logs.push(...this.cancelPositionLocally(position, signal.generatedAt, "all entry orders were rejected by Hyperliquid"));
+      await this.saveState();
+      return logs;
     }
 
     await this.saveState();
@@ -1079,8 +1135,28 @@ export class HyperliquidLiveBroker implements Broker {
       return logs;
     }
 
+    const activePositionCountsBySymbol = new Map<string, number>();
+    for (const position of this.openPositions.values()) {
+      if (position.status === "closed" || position.status === "cancelled") {
+        continue;
+      }
+
+      activePositionCountsBySymbol.set(position.symbol, (activePositionCountsBySymbol.get(position.symbol) ?? 0) + 1);
+    }
+
+    const loggedDuplicateSymbols = new Set<string>();
     for (const position of this.openPositions.values()) {
       if (position.status !== "open" || position.remainingSizeUnits <= POSITION_EPSILON) {
+        continue;
+      }
+
+      if ((activePositionCountsBySymbol.get(position.symbol) ?? 0) > 1) {
+        if (!loggedDuplicateSymbols.has(position.symbol)) {
+          logs.push(
+            `${position.symbol}: skipped protective order management because multiple active local positions exist for this symbol; repair the live state file before allowing the bot to manage TP/SL orders.`,
+          );
+          loggedDuplicateSymbols.add(position.symbol);
+        }
         continue;
       }
 
@@ -1287,6 +1363,16 @@ export class HyperliquidLiveBroker implements Broker {
     for (const [index, result] of results.entries()) {
       const placement = protectivePlacements[index];
       if (!placement) {
+        continue;
+      }
+
+      if (result.status === "error") {
+        placement.order.status = "cancelled";
+        delete placement.order.clientOrderId;
+        delete placement.order.exchangeOrderId;
+        logs.push(
+          `${position.symbol}: protective order ${result.clientOrderId ?? "unknown"} was rejected by Hyperliquid: ${result.error ?? "unknown exchange error"}.`,
+        );
         continue;
       }
 

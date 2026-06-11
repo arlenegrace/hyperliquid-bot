@@ -7,7 +7,7 @@ import type {
   HyperliquidOrderPlacementResult,
   HyperliquidPlaceOrderSpec,
 } from "../clients/hyperliquidExchange.js";
-import type { BotConfig, BrokerPosition } from "../types.js";
+import type { BotConfig, BrokerPosition, StrategySignal } from "../types.js";
 import { HyperliquidLiveBroker } from "./liveBroker.js";
 
 function createConfig(): BotConfig {
@@ -86,6 +86,59 @@ function createOpenPosition(overrides: Partial<BrokerPosition> = {}): BrokerPosi
   };
 }
 
+function createSignal(overrides: Partial<StrategySignal> = {}): StrategySignal {
+  const triggerCandle = {
+    openTime: 1,
+    closeTime: 2,
+    symbol: "BTC",
+    interval: "4h" as const,
+    open: 100,
+    high: 105,
+    low: 95,
+    close: 100,
+    volume: 1,
+    trades: 1,
+  };
+
+  return {
+    strategyId: "manual-range-trading-v2",
+    symbol: "BTC",
+    side: "long",
+    entryReferencePrice: 100,
+    stopLoss: 90,
+    entryOrders: [
+      { label: "entry 1", price: 100, riskFraction: 0.5 },
+      { label: "entry 2", price: 110, riskFraction: 0.5 },
+    ],
+    exitOrders: [
+      { label: "tp 1", price: 120, sizeFraction: 0.5 },
+      { label: "tp 2", price: 130, sizeFraction: 0.5 },
+    ],
+    range: {
+      high: 130,
+      low: 90,
+      mid: 110,
+      width: 40,
+      widthPct: 0.4,
+      lookbackCandles: 10,
+      startTime: 0,
+      endTime: 2,
+      anchorHighTime: 1,
+      anchorLowTime: 1,
+      highTouchCount: 1,
+      lowTouchCount: 1,
+      source: "manual",
+      confidenceScore: 1,
+    },
+    triggerCandle,
+    reason: "test",
+    generatedAt: 2,
+    expiryTime: 10,
+    maxRiskUsd: 20,
+    ...overrides,
+  };
+}
+
 function createBrokerHarness(options: {
   cancelImpl?: (requests: HyperliquidCancelOrderRequest[]) => Promise<HyperliquidCancelOrderResult[]>;
   placeImpl?: (specs: HyperliquidPlaceOrderSpec[]) => Promise<HyperliquidOrderPlacementResult[]>;
@@ -95,12 +148,15 @@ function createBrokerHarness(options: {
   const broker = new HyperliquidLiveBroker(createConfig(), "https://api.hyperliquid.xyz") as any;
 
   broker.gateway = {
+    initialize: async () => {},
+    validateAccountAddress: () => createConfig().live.accountAddress,
     getAssetInfo: () => ({
       symbol: "BTC",
       assetId: 0,
       szDecimals: 3,
       maxLeverage: 50,
     }),
+    ensureLeverage: async () => 3,
     cancelOrders: async (requests: HyperliquidCancelOrderRequest[]) => {
       cancelCalls.push(requests.map((request) => ({ ...request })));
       if (options.cancelImpl) {
@@ -125,6 +181,10 @@ function createBrokerHarness(options: {
       }));
     },
   };
+  broker.initialized = true;
+  broker.accountAddress = createConfig().live.accountAddress;
+  broker.lastAccountStreamEventAt = Date.now();
+  broker.saveState = async () => {};
 
   return {
     broker,
@@ -228,4 +288,61 @@ test("live broker skips stop replacement when the existing stop cancel fails", a
   assert.equal(position.stopOrder?.clientOrderId, oldStopClientOrderId);
   assert.equal(position.stopOrder?.sizeUnits, 1);
   assert.match(logs.join("\n"), /skipped stop-loss replacement/);
+});
+
+test("live broker skips a same-symbol entry when a local position is already active", async () => {
+  const { broker, placementCalls } = createBrokerHarness();
+  const position = createOpenPosition();
+  broker.openPositions.set(position.id, position);
+
+  const logs = await broker.openPosition(createSignal());
+
+  assert.equal(placementCalls.length, 0);
+  assert.match(logs.join("\n"), /active local position\(s\) already exist/);
+});
+
+test("live broker pauses protective order management for duplicate active symbol positions", async () => {
+  const { broker, cancelCalls, placementCalls } = createBrokerHarness();
+  const firstPosition = createOpenPosition({ id: "position-1" });
+  const secondPosition = createOpenPosition({ id: "position-2" });
+  broker.openPositions.set(firstPosition.id, firstPosition);
+  broker.openPositions.set(secondPosition.id, secondPosition);
+
+  const logs = await broker.runEnsureProtectiveOrders();
+
+  assert.equal(cancelCalls.length, 0);
+  assert.equal(placementCalls.length, 0);
+  assert.match(logs.join("\n"), /multiple active local positions exist/);
+});
+
+test("live broker keeps accepted entry legs when another ladder leg is rejected", async () => {
+  const { broker, placementCalls } = createBrokerHarness({
+    placeImpl: async (specs) =>
+      specs.map((spec, index) =>
+        index === 0
+          ? {
+              symbol: spec.symbol,
+              ...(spec.clientOrderId ? { clientOrderId: spec.clientOrderId } : {}),
+              orderId: 1000,
+              status: "resting" as const,
+            }
+          : {
+              symbol: spec.symbol,
+              ...(spec.clientOrderId ? { clientOrderId: spec.clientOrderId } : {}),
+              status: "error" as const,
+              error: "Insufficient margin",
+            },
+      ),
+  });
+
+  const logs = await broker.openPosition(createSignal());
+  const positions = [...broker.openPositions.values()] as BrokerPosition[];
+
+  assert.equal(placementCalls.length, 1);
+  assert.equal(positions.length, 1);
+  assert.equal(positions[0]!.entryOrders[0]!.status, "pending");
+  assert.equal(positions[0]!.entryOrders[1]!.status, "cancelled");
+  assert.equal(positions[0]!.intendedSizeUnits, positions[0]!.entryOrders[0]!.sizeUnits);
+  assert.equal(positions[0]!.exitOrders[0]!.sizeUnits, positions[0]!.intendedSizeUnits * 0.5);
+  assert.match(logs.join("\n"), /was rejected by Hyperliquid: Insufficient margin/);
 });

@@ -73,9 +73,10 @@ export interface HyperliquidOrderPlacementResult {
   symbol: string;
   clientOrderId?: `0x${string}`;
   orderId?: number;
-  status: "resting" | "filled" | "waitingForFill" | "waitingForTrigger";
+  status: "resting" | "filled" | "waitingForFill" | "waitingForTrigger" | "error";
   filledSizeUnits?: number;
   averageFillPrice?: number;
+  error?: string;
 }
 
 export interface HyperliquidCancelOrderRequest {
@@ -179,6 +180,15 @@ function normalizeWalletAddress(address: string): `0x${string}` {
 }
 
 function isCancelErrorStatus(status: unknown): status is { error: string } {
+  return (
+    typeof status === "object" &&
+    status !== null &&
+    "error" in status &&
+    typeof (status as { error?: unknown }).error === "string"
+  );
+}
+
+function isOrderErrorStatus(status: unknown): status is { error: string } {
   return (
     typeof status === "object" &&
     status !== null &&
@@ -494,6 +504,15 @@ export class HyperliquidExchangeGateway {
 
     return response.response.data.statuses.map((status, index) => {
       const spec = specs[index]!;
+      if (isOrderErrorStatus(status)) {
+        return {
+          symbol: spec.symbol,
+          ...(spec.clientOrderId ? { clientOrderId: spec.clientOrderId } : {}),
+          status: "error" as const,
+          error: status.error,
+        };
+      }
+
       if (status === "waitingForFill") {
         return {
           symbol: spec.symbol,
