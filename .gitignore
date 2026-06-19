@@ -17,6 +17,7 @@ rules.md
 # Local runtime state
 .manual-range-state.json
 .live-broker-state.json
+.live-broker-state.candle-cache.json
 
 # Logs
 *.log

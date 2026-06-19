@@ -673,17 +673,25 @@ export class HyperliquidLiveBroker implements Broker {
     if (position.status === "open" && position.remainingSizeUnits > POSITION_EPSILON) {
       const referencePrice = this.lastMarks.get(position.symbol) ?? position.entryReferencePrice;
       const closeClientOrderId = this.buildClientOrderId(position.id, `manual-close-${closedAt}`);
-      await this.gateway.placeOrders([
-        {
-          symbol: position.symbol,
-          side: oppositeTradeSide(position.side),
-          price: this.applySlippage(oppositeTradeSide(position.side), referencePrice),
-          sizeUnits: position.remainingSizeUnits,
-          reduceOnly: true,
-          tif: "FrontendMarket",
-          clientOrderId: closeClientOrderId,
-        },
-      ]);
+      try {
+        await this.gateway.placeOrders([
+          {
+            symbol: position.symbol,
+            side: oppositeTradeSide(position.side),
+            price: this.applySlippage(oppositeTradeSide(position.side), referencePrice),
+            sizeUnits: position.remainingSizeUnits,
+            reduceOnly: true,
+            tif: "FrontendMarket",
+            clientOrderId: closeClientOrderId,
+          },
+        ]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logs.push(`${position.symbol}: market close failed for ${position.id}: ${message}. Falling back to REST reconciliation.`);
+        logs.push(...(await this.syncRemoteState()));
+        await this.saveState();
+        return logs;
+      }
       logs.push(`${position.symbol}: submitted reduce-only market close for ${position.id}.`);
       if (this.usesWebsocketRuntime()) {
         const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
@@ -692,7 +700,7 @@ export class HyperliquidLiveBroker implements Broker {
           logs.push(...(await this.syncRemoteState()));
         }
       } else {
-        await this.syncRemoteState();
+        logs.push(...(await this.syncRemoteState()));
       }
     } else {
       logs.push(...this.cancelPositionLocally(position, closedAt, reason, note));
@@ -1406,7 +1414,15 @@ export class HyperliquidLiveBroker implements Broker {
       return logs;
     }
 
-    const results = await this.gateway.placeOrders(protectivePlacements.map((placement) => placement.spec));
+    let results: HyperliquidOrderPlacementResult[];
+    try {
+      results = await this.gateway.placeOrders(protectivePlacements.map((placement) => placement.spec));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logs.push(`${position.symbol}: protective order placement failed: ${message}. Will retry on the next cycle.`);
+      return logs;
+    }
+
     for (const [index, result] of results.entries()) {
       const placement = protectivePlacements[index];
       if (!placement) {
@@ -1458,20 +1474,28 @@ export class HyperliquidLiveBroker implements Broker {
 
       const referencePrice = this.lastMarks.get(position.symbol) ?? signal.entryReferencePrice;
       const clientOrderId = this.buildClientOrderId(position.id, `flip-flatten-${signal.generatedAt}`);
-      await this.gateway.placeOrders([
-        {
-          symbol: position.symbol,
-          side: oppositeTradeSide(position.side),
-          price: this.applySlippage(oppositeTradeSide(position.side), referencePrice),
-          sizeUnits: position.remainingSizeUnits,
-          reduceOnly: true,
-          tif: "FrontendMarket",
-          clientOrderId,
-        },
-      ]);
-      logs.push(
-        `${position.symbol}: flattened ${position.side} exposure of ${position.remainingSizeUnits.toFixed(6)} units before opening the ${signal.side} flip.`,
-      );
+      try {
+        await this.gateway.placeOrders([
+          {
+            symbol: position.symbol,
+            side: oppositeTradeSide(position.side),
+            price: this.applySlippage(oppositeTradeSide(position.side), referencePrice),
+            sizeUnits: position.remainingSizeUnits,
+            reduceOnly: true,
+            tif: "FrontendMarket",
+            clientOrderId,
+          },
+        ]);
+        logs.push(
+          `${position.symbol}: flattened ${position.side} exposure of ${position.remainingSizeUnits.toFixed(6)} units before opening the ${signal.side} flip.`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logs.push(
+          `${position.symbol}: failed to flatten ${position.side} exposure for ${position.id}: ${message}. Falling back to REST reconciliation.`,
+        );
+        logs.push(...(await this.syncRemoteState()));
+      }
     }
 
     if (this.usesWebsocketRuntime()) {
@@ -1758,6 +1782,11 @@ export class HyperliquidLiveBroker implements Broker {
       }
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        return;
+      }
+
+      if (error instanceof SyntaxError) {
+        console.error(`[live-broker] State file ${statePath} contains invalid JSON. Starting with empty state. The corrupt file has NOT been deleted — back it up manually if needed.`);
         return;
       }
 

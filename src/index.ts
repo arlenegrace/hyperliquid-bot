@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   if (!runOnceMode && config.runtimeMode === "websocket") {
     const runner = new WebsocketRunner(config, marketDataClient, broker, bot);
     await runner.start();
-    return;
+    process.exit(0);
   }
 
   await executeCycle();

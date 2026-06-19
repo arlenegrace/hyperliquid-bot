@@ -4,6 +4,7 @@ import {
   HyperliquidSubscriptionGateway,
   type HyperliquidAccountStreamEvent,
 } from "../clients/hyperliquidSubscriptions.js";
+import { loadCandleCache, saveCandleCache } from "../candleCache.js";
 import type { BotConfig, Candle } from "../types.js";
 import { CandleStore } from "./candleStore.js";
 import type { Broker } from "./broker.js";
@@ -11,6 +12,9 @@ import { HyperliquidLiveBroker } from "./liveBroker.js";
 import { TradingBot } from "./bot.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const RESUBSCRIBE_BASE_DELAY_MS = 5_000;
+const RESUBSCRIBE_MAX_DELAY_MS = 120_000;
+const RESUBSCRIBE_MAX_ATTEMPTS = 20;
 
 function formatStreamError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -23,11 +27,13 @@ export function getDelayUntilNextCandleCloseGrace(now: number, graceMs: number):
 
 export class WebsocketRunner {
   private readonly candleStore: CandleStore;
-  private readonly subscriptionGateway: HyperliquidSubscriptionGateway;
+  private subscriptionGateway: HyperliquidSubscriptionGateway;
   private candleCloseTimer: ReturnType<typeof setTimeout> | undefined;
   private staleTimer: ReturnType<typeof setInterval> | undefined;
+  private resubscribeTimer: ReturnType<typeof setTimeout> | undefined;
   private processing = false;
   private stopping = false;
+  private resubscribeAttempts = 0;
 
   constructor(
     private readonly config: BotConfig,
@@ -40,10 +46,7 @@ export class WebsocketRunner {
       maxCandlesPerSymbol: config.rangeLookbackCandles + 2,
       candleCloseGraceMs: config.websocket.candleCloseGraceMs,
     });
-    this.subscriptionGateway = new HyperliquidSubscriptionGateway({
-      useTestnet: config.live.useTestnet,
-      timeoutMs: config.live.orderTimeoutMs,
-    });
+    this.subscriptionGateway = this.createSubscriptionGateway();
   }
 
   async start(): Promise<void> {
@@ -68,6 +71,9 @@ export class WebsocketRunner {
         }
         if (this.staleTimer) {
           clearInterval(this.staleTimer);
+        }
+        if (this.resubscribeTimer) {
+          clearTimeout(this.resubscribeTimer);
         }
 
         console.log("[boot] Shutdown requested. Closing websocket subscriptions.");
@@ -94,16 +100,53 @@ export class WebsocketRunner {
     });
   }
 
+  private createSubscriptionGateway(): HyperliquidSubscriptionGateway {
+    return new HyperliquidSubscriptionGateway({
+      useTestnet: this.config.live.useTestnet,
+      timeoutMs: this.config.live.orderTimeoutMs,
+    });
+  }
+
+  private get candleCachePath(): string {
+    return this.config.live.stateFile.replace(/\.json$/, "") + ".candle-cache.json";
+  }
+
   private async bootstrapCandles(): Promise<void> {
     const candlesBySymbol = new Map<string, Candle[]>();
-    for (const symbol of this.config.watchlist) {
-      const candles = await this.marketDataClient.fetchRecentClosedCandles(
-        symbol,
-        this.config.interval,
-        this.config.rangeLookbackCandles + 2,
-      );
-      this.candleStore.seed(symbol, candles);
-      candlesBySymbol.set(symbol, candles);
+    let usedCache = false;
+
+    try {
+      for (const symbol of this.config.watchlist) {
+        const candles = await this.marketDataClient.fetchRecentClosedCandles(
+          symbol,
+          this.config.interval,
+          this.config.rangeLookbackCandles + 2,
+        );
+        this.candleStore.seed(symbol, candles);
+        candlesBySymbol.set(symbol, candles);
+      }
+      await saveCandleCache(this.candleCachePath, candlesBySymbol);
+    } catch (error) {
+      const message = formatStreamError(error);
+      console.error(`[boot] REST bootstrap failed: ${message}. Attempting to load from local candle cache.`);
+
+      const cached = await loadCandleCache(this.candleCachePath);
+      if (cached.size === 0) {
+        throw new Error(`REST bootstrap failed and no local candle cache is available. Original error: ${message}`);
+      }
+
+      candlesBySymbol.clear();
+      for (const symbol of this.config.watchlist) {
+        const candles = cached.get(symbol.toUpperCase());
+        if (candles && candles.length > 0) {
+          this.candleStore.seed(symbol, candles);
+          candlesBySymbol.set(symbol, candles);
+        } else {
+          console.warn(`[boot] No cached candles for ${symbol}. This symbol will be skipped until the next REST candle close cycle.`);
+        }
+      }
+      usedCache = true;
+      console.log(`[boot] Loaded ${candlesBySymbol.size} symbol(s) from local candle cache.`);
     }
 
     await this.bot.runForClosedCandles(candlesBySymbol);
@@ -112,6 +155,10 @@ export class WebsocketRunner {
       if (latest) {
         this.candleStore.markProcessed(symbol, latest.closeTime);
       }
+    }
+
+    if (usedCache) {
+      console.warn("[boot] Bootstrap used cached candles. Data may be stale — the next 4h candle close cycle will fetch fresh data from the exchange.");
     }
   }
 
@@ -128,6 +175,7 @@ export class WebsocketRunner {
       },
       (feed, reason) => {
         console.error(`[ws] ${feed} subscription failed: ${reason instanceof Error ? reason.message : String(reason)}`);
+        this.scheduleResubscribe(`${feed} subscription failed`);
       },
     );
 
@@ -147,8 +195,67 @@ export class WebsocketRunner {
             console.error(`[ws] Failed to enqueue account stream event: ${formatStreamError(error)}`);
           }
         },
-        (feed, reason) => liveBroker.markRemoteSubscriptionFailed(feed, reason),
+        (feed, reason) => {
+          liveBroker.markRemoteSubscriptionFailed(feed, reason);
+          this.scheduleResubscribe(`${feed} subscription failed`);
+        },
       );
+    }
+
+    this.subscriptionGateway.onTransportTermination((reason) => {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      console.error(`[ws] WebSocket transport terminated: ${message}`);
+      const liveBroker = this.broker instanceof HyperliquidLiveBroker ? this.broker : undefined;
+      if (liveBroker) {
+        liveBroker.markRemoteSubscriptionFailed("transport", reason);
+      }
+      this.scheduleResubscribe("transport terminated");
+    });
+  }
+
+  private scheduleResubscribe(reason: string): void {
+    if (this.stopping || this.resubscribeTimer) {
+      return;
+    }
+
+    if (this.resubscribeAttempts >= RESUBSCRIBE_MAX_ATTEMPTS) {
+      console.error(`[ws] Resubscribe abandoned after ${RESUBSCRIBE_MAX_ATTEMPTS} attempts. The bot will continue operating using REST reconciliation only.`);
+      return;
+    }
+
+    const delayMs = Math.min(
+      RESUBSCRIBE_BASE_DELAY_MS * Math.pow(2, this.resubscribeAttempts),
+      RESUBSCRIBE_MAX_DELAY_MS,
+    );
+    this.resubscribeAttempts += 1;
+
+    console.log(`[ws] Scheduling resubscribe in ${Math.round(delayMs / 1000)}s (attempt ${this.resubscribeAttempts}/${RESUBSCRIBE_MAX_ATTEMPTS}, reason: ${reason}).`);
+
+    this.resubscribeTimer = setTimeout(() => {
+      this.resubscribeTimer = undefined;
+      void this.attemptResubscribe();
+    }, delayMs);
+  }
+
+  private async attemptResubscribe(): Promise<void> {
+    if (this.stopping) {
+      return;
+    }
+
+    console.log("[ws] Attempting to resubscribe all streams...");
+    try {
+      try {
+        await this.subscriptionGateway.close();
+      } catch {
+        // Ignore close errors during resubscribe — we're creating a fresh gateway.
+      }
+      this.subscriptionGateway = this.createSubscriptionGateway();
+      await this.subscribeStreams();
+      this.resubscribeAttempts = 0;
+      console.log("[ws] Resubscribe succeeded. All streams are active.");
+    } catch (error) {
+      console.error(`[ws] Resubscribe failed: ${formatStreamError(error)}`);
+      this.scheduleResubscribe("resubscribe attempt failed");
     }
   }
 
@@ -186,6 +293,7 @@ export class WebsocketRunner {
         candlesBySymbol.set(symbol, candles);
       }
 
+      await saveCandleCache(this.candleCachePath, candlesBySymbol);
       await this.bot.runForClosedCandles(candlesBySymbol);
       for (const [symbol, candles] of candlesBySymbol.entries()) {
         const latest = candles.at(-1);

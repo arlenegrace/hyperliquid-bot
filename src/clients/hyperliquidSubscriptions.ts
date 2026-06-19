@@ -173,6 +173,7 @@ export class HyperliquidSubscriptionGateway {
   private readonly transport: WebSocketTransport;
   private readonly client: SubscriptionClient;
   private readonly subscriptions: ISubscription[] = [];
+  private transportTerminationListener: (() => void) | undefined;
 
   constructor(options: HyperliquidSubscriptionGatewayOptions) {
     this.transport = new WebSocketTransport({
@@ -186,6 +187,24 @@ export class HyperliquidSubscriptionGateway {
     this.client = new SubscriptionClient({ transport: this.transport });
   }
 
+  onTransportTermination(callback: (reason: unknown) => void): void {
+    if (this.transportTerminationListener) {
+      return;
+    }
+
+    const listener = (): void => {
+      callback(this.transport.socket.terminationReason);
+    };
+
+    this.transportTerminationListener = listener;
+    if (this.transport.socket.isTerminated) {
+      listener();
+      return;
+    }
+
+    this.transport.socket.terminationSignal.addEventListener("abort", listener);
+  }
+
   async subscribeCandles(
     symbols: string[],
     interval: CandleInterval,
@@ -195,9 +214,14 @@ export class HyperliquidSubscriptionGateway {
     for (const symbol of symbols) {
       const normalizedSymbol = symbol.toUpperCase();
       const subscription = await this.client.candle({ coin: normalizedSymbol, interval }, (event) => {
-        const candle = normalizeCandle(event, interval);
-        if (candle) {
-          listener(candle);
+        try {
+          const candle = normalizeCandle(event, interval);
+          if (candle) {
+            listener(candle);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ws] Failed to process candle event for ${normalizedSymbol}: ${message}`);
         }
       });
       this.trackSubscription(subscription, `candle:${normalizedSymbol}`, onFailure);
@@ -213,74 +237,111 @@ export class HyperliquidSubscriptionGateway {
       onFailure(feed, reason);
     };
 
-    this.trackSubscription(
-      await this.client.openOrders({ user }, (event) => {
-        listener({
-          type: "openOrders",
-          receivedAt: Date.now(),
-          orders: event.orders.map(normalizeOpenOrder),
-        });
-      }),
-      "openOrders",
-      pushFailure,
-    );
+    const batchSubscriptions: ISubscription[] = [];
+    const batchFeeds: string[] = [];
 
-    this.trackSubscription(
-      await this.client.orderUpdates({ user }, (updates) => {
-        listener({
-          type: "orderUpdates",
-          receivedAt: Date.now(),
-          updates: updates.map((update) => ({
-            order: normalizeOpenOrder(update.order),
-            status: update.status as OrderProcessingStatus,
-            statusTimestamp: update.statusTimestamp,
-          })),
-        });
-      }),
-      "orderUpdates",
-      pushFailure,
-    );
+    try {
+      const openOrdersSub = await this.client.openOrders({ user }, (event) => {
+        try {
+          listener({
+            type: "openOrders",
+            receivedAt: Date.now(),
+            orders: event.orders.map(normalizeOpenOrder),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ws] Failed to process openOrders event: ${message}`);
+        }
+      });
+      batchSubscriptions.push(openOrdersSub);
+      batchFeeds.push("openOrders");
 
-    this.trackSubscription(
-      await this.client.userFills({ user }, (event) => {
-        listener({
-          type: "fills",
-          receivedAt: Date.now(),
-          isSnapshot: event.isSnapshot === true,
-          fills: event.fills.map(normalizeFill),
-        });
-      }),
-      "userFills",
-      pushFailure,
-    );
+      const orderUpdatesSub = await this.client.orderUpdates({ user }, (updates) => {
+        try {
+          listener({
+            type: "orderUpdates",
+            receivedAt: Date.now(),
+            updates: updates.map((update) => ({
+              order: normalizeOpenOrder(update.order),
+              status: update.status as OrderProcessingStatus,
+              statusTimestamp: update.statusTimestamp,
+            })),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ws] Failed to process orderUpdates event: ${message}`);
+        }
+      });
+      batchSubscriptions.push(orderUpdatesSub);
+      batchFeeds.push("orderUpdates");
 
-    this.trackSubscription(
-      await this.client.clearinghouseState({ user }, (event) => {
-        listener({
-          type: "clearinghouseState",
-          receivedAt: Date.now(),
-          snapshot: normalizeAccountSnapshot(event.clearinghouseState),
-        });
-      }),
-      "clearinghouseState",
-      pushFailure,
-    );
+      const userFillsSub = await this.client.userFills({ user }, (event) => {
+        try {
+          listener({
+            type: "fills",
+            receivedAt: Date.now(),
+            isSnapshot: event.isSnapshot === true,
+            fills: event.fills.map(normalizeFill),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ws] Failed to process userFills event: ${message}`);
+        }
+      });
+      batchSubscriptions.push(userFillsSub);
+      batchFeeds.push("userFills");
 
-    this.trackSubscription(
-      await this.client.userFundings({ user }, (event) => {
-        listener({
-          type: "fundings",
-          receivedAt: Date.now(),
-          isSnapshot: event.isSnapshot === true,
-          fundings: event.fundings.map((funding) => ({
-            time: funding.time,
-            usdc: parseNumber(funding.usdc),
-          })),
-        });
-      }),
-      "userFundings",
-      pushFailure,
-    );
+      const clearinghouseStateSub = await this.client.clearinghouseState({ user }, (event) => {
+        try {
+          listener({
+            type: "clearinghouseState",
+            receivedAt: Date.now(),
+            snapshot: normalizeAccountSnapshot(event.clearinghouseState),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ws] Failed to process clearinghouseState event: ${message}`);
+        }
+      });
+      batchSubscriptions.push(clearinghouseStateSub);
+      batchFeeds.push("clearinghouseState");
+
+      const userFundingsSub = await this.client.userFundings({ user }, (event) => {
+        try {
+          listener({
+            type: "fundings",
+            receivedAt: Date.now(),
+            isSnapshot: event.isSnapshot === true,
+            fundings: event.fundings.map((funding) => ({
+              time: funding.time,
+              usdc: parseNumber(funding.usdc),
+            })),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ws] Failed to process userFundings event: ${message}`);
+        }
+      });
+      batchSubscriptions.push(userFundingsSub);
+      batchFeeds.push("userFundings");
+    } catch (error) {
+      const failedFeed = batchFeeds.length < 5
+        ? ["openOrders", "orderUpdates", "userFills", "clearinghouseState", "userFundings"][batchFeeds.length] ?? "unknown"
+        : "unknown";
+      console.error(`[ws] Account subscription ${failedFeed} failed. Rolling back ${batchSubscriptions.length} successful subscription(s).`);
+      await Promise.allSettled(batchSubscriptions.map((sub) => sub.unsubscribe()));
+      for (let i = batchSubscriptions.length - 1; i >= 0; i--) {
+        const idx = this.subscriptions.indexOf(batchSubscriptions[i]!);
+        if (idx >= 0) {
+          this.subscriptions.splice(idx, 1);
+        }
+      }
+      throw error;
+    }
+
+    for (let i = 0; i < batchSubscriptions.length; i++) {
+      this.trackSubscription(batchSubscriptions[i]!, batchFeeds[i]!, pushFailure);
+    }
   }
 
   async close(): Promise<void> {

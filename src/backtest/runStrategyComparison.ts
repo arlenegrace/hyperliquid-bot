@@ -352,7 +352,7 @@ async function main(): Promise<void> {
     `[backtest] Strategy evaluation and order generation begin at ${formatConsoleTimestamp(BACKTEST_TRADING_START_TIME)}; earlier candles are warmup/history only.`,
   );
   const strategies = createAllStrategies();
-  const results = await Promise.all(
+  const settledResults = await Promise.allSettled(
     strategies.map((strategy) =>
       runBacktest(
       strategy,
@@ -365,6 +365,16 @@ async function main(): Promise<void> {
       ),
     ),
   );
+  const results: StrategyBacktestResult[] = [];
+  for (const [index, settled] of settledResults.entries()) {
+    if (settled.status === "fulfilled") {
+      results.push(settled.value);
+    } else {
+      const strategyId = strategies[index]?.id ?? `strategy-${index}`;
+      const message = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+      console.error(`[backtest] ${strategyId} backtest failed: ${message}`);
+    }
+  }
   const rankedResults = rankResults(results.map((result) => result.summary));
 
   console.log("[backtest] Strategy comparison:");

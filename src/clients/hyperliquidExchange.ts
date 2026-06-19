@@ -541,7 +541,7 @@ export class HyperliquidExchangeGateway {
       grouping: "na",
     });
 
-    return response.response.data.statuses.map((status, index) => {
+    const results = response.response.data.statuses.map((status, index) => {
       const spec = specs[index];
       if (!spec) {
         return {
@@ -594,6 +594,18 @@ export class HyperliquidExchangeGateway {
         averageFillPrice: parseNumber(status.filled.avgPx),
       };
     });
+
+    for (let i = results.length; i < specs.length; i++) {
+      const spec = specs[i]!;
+      results.push({
+        symbol: spec.symbol,
+        ...(spec.clientOrderId ? { clientOrderId: spec.clientOrderId } : {}),
+        status: "error" as const,
+        error: "Hyperliquid returned fewer order statuses than orders sent.",
+      });
+    }
+
+    return results;
   }
 
   async cancelOrders(requests: HyperliquidCancelOrderRequest[]): Promise<HyperliquidCancelOrderResult[]> {

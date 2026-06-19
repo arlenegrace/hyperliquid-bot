@@ -114,21 +114,32 @@ function normalizeManualRangeState(state: ManualRangeState): ManualRangeState {
 
 export async function loadManualRanges(filePath: string): Promise<ManualRangeMap> {
   const absolutePath = resolveManualRangePath(filePath);
-  const rawFile = await readFile(absolutePath, "utf8");
-  const parsedFile = manualRangeFileSchema.parse(JSON.parse(rawFile));
+  try {
+    const rawFile = await readFile(absolutePath, "utf8");
+    const parsedFile = manualRangeFileSchema.parse(JSON.parse(rawFile));
 
-  return Object.fromEntries(
-    parsedFile.ranges.map((range) => [
-      range.symbol,
-      {
-        symbol: range.symbol,
-        rangeLow: range.rangeLow,
-        rangeHigh: range.rangeHigh,
-        ...(range.validFromTime !== undefined ? { validFromTime: range.validFromTime } : {}),
-        ...(range.notes !== undefined ? { notes: range.notes } : {}),
-      },
-    ]),
-  );
+    return Object.fromEntries(
+      parsedFile.ranges.map((range) => [
+        range.symbol,
+        {
+          symbol: range.symbol,
+          rangeLow: range.rangeLow,
+          rangeHigh: range.rangeHigh,
+          ...(range.validFromTime !== undefined ? { validFromTime: range.validFromTime } : {}),
+          ...(range.notes !== undefined ? { notes: range.notes } : {}),
+        },
+      ]),
+    );
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      console.error(`[manual-ranges] Range file ${absolutePath} not found. Using empty ranges.`);
+      return {};
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[manual-ranges] Failed to parse range file ${absolutePath}: ${message}. Using empty ranges.`);
+    return {};
+  }
 }
 
 export function getManualRangeForSymbol(ranges: ManualRangeMap, symbol: string): ManualRangeDefinition | undefined {
@@ -273,7 +284,9 @@ export async function loadManualRangeStates(filePath: string): Promise<Map<strin
       return new Map();
     }
 
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[manual-ranges] Failed to parse range state file ${absolutePath}: ${message}. Using empty state.`);
+    return new Map();
   }
 }
 

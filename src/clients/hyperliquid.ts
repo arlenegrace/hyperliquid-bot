@@ -43,8 +43,15 @@ export class HyperliquidClient {
   ): Promise<Candle[]> {
     const candleByOpenTime = new Map<number, Candle>();
     let cursorEndTime = endTime;
+    const maxIterations = 100;
+    let iterations = 0;
 
     while (cursorEndTime > startTime && (limit === undefined || candleByOpenTime.size < limit)) {
+      if (++iterations > maxIterations) {
+        console.error(`[hyperliquid] Candle pagination for ${symbol} exceeded ${maxIterations} iterations. Stopping to prevent infinite loop.`);
+        break;
+      }
+
       const pageCandles = await this.requestCandlePage(symbol, interval, cursorEndTime, MAX_CANDLES_PER_REQUEST);
 
       if (pageCandles.length === 0) {
