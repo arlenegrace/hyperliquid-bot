@@ -20,6 +20,14 @@ import {
 } from "./manualRanges.js";
 import { createStrategies } from "../strategies/index.js";
 
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.stack ?? error.message : String(error);
+}
+
+process.on("unhandledRejection", (reason) => {
+  console.error(`[fatal] Unhandled promise rejection: ${formatError(reason)}`);
+});
+
 function colorize(symbol: string, color: string): string {
   return `${color}${formatConsoleSymbol(symbol)}${ANSI_RESET}`;
 }
@@ -75,8 +83,7 @@ async function main(): Promise<void> {
     try {
       await bot.runOnce();
     } catch (error) {
-      const message = error instanceof Error ? error.stack ?? error.message : String(error);
-      console.error(`[bot] Cycle failed: ${message}`);
+      console.error(`[bot] Cycle failed: ${formatError(error)}`);
       if (runOnceMode) {
         throw error;
       }
@@ -112,7 +119,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
-  console.error(`[fatal] ${message}`);
+  console.error(`[fatal] ${formatError(error)}`);
   process.exit(1);
 });

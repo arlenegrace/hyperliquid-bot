@@ -21,5 +21,9 @@ export function createStrategies(activeStrategyId: ActiveStrategyId): TradingStr
       return [new ManualRangeTradingV2Strategy()];
     case "manual-range-trading-v3":
       return [new ManualRangeTradingV3Strategy()];
+    default: {
+      const unsupportedStrategyId: never = activeStrategyId;
+      throw new Error(`Unsupported active strategy id: ${unsupportedStrategyId}`);
+    }
   }
 }

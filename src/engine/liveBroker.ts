@@ -1163,7 +1163,14 @@ export class HyperliquidLiveBroker implements Broker {
 
   private async flushDebouncedProtectiveOrders(): Promise<void> {
     const waiters = this.protectiveOrdersDebounceWaiters.splice(0);
-    const logs = await this.runEnsureProtectiveOrders();
+    let logs: string[] = [];
+    try {
+      logs = await this.runEnsureProtectiveOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logs = [`Protective order sync failed: ${message}`];
+    }
+
     for (const resolve of waiters) {
       resolve(logs);
     }
@@ -1760,7 +1767,6 @@ export class HyperliquidLiveBroker implements Broker {
 
   private async saveState(): Promise<void> {
     const statePath = resolveStatePath(this.config.live.stateFile);
-    await mkdir(path.dirname(statePath), { recursive: true });
     const payload: LiveBrokerStateFile = {
       startingBalanceUsd: this.startingBalanceUsd,
       realizedPnlUsd: this.realizedPnlUsd,
@@ -1780,6 +1786,12 @@ export class HyperliquidLiveBroker implements Broker {
       cancelledPositions: this.cancelledPositions.map(clonePosition),
     };
 
-    await writeFile(statePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    try {
+      await mkdir(path.dirname(statePath), { recursive: true });
+      await writeFile(statePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[live-broker] Failed to persist state to ${statePath}: ${message}`);
+    }
   }
 }

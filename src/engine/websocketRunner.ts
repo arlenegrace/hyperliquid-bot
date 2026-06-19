@@ -12,6 +12,10 @@ import { TradingBot } from "./bot.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
+function formatStreamError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function getDelayUntilNextCandleCloseGrace(now: number, graceMs: number): number {
   const nextCloseTime = Math.ceil((now + 1) / FOUR_HOURS_MS) * FOUR_HOURS_MS - 1;
   return Math.max(0, nextCloseTime + graceMs - now);
@@ -67,12 +71,26 @@ export class WebsocketRunner {
         }
 
         console.log("[boot] Shutdown requested. Closing websocket subscriptions.");
-        await this.subscriptionGateway.close();
+        try {
+          await this.subscriptionGateway.close();
+        } catch (error) {
+          console.error(`[boot] Failed to close websocket subscriptions: ${formatStreamError(error)}`);
+        }
         resolve();
       };
 
-      process.once("SIGINT", () => void shutdown());
-      process.once("SIGTERM", () => void shutdown());
+      process.once("SIGINT", () => {
+        void shutdown().catch((error) => {
+          console.error(`[boot] Shutdown failed: ${formatStreamError(error)}`);
+          resolve();
+        });
+      });
+      process.once("SIGTERM", () => {
+        void shutdown().catch((error) => {
+          console.error(`[boot] Shutdown failed: ${formatStreamError(error)}`);
+          resolve();
+        });
+      });
     });
   }
 
@@ -102,7 +120,11 @@ export class WebsocketRunner {
       this.config.watchlist,
       this.config.interval,
       (candle) => {
-        this.candleStore.upsertFromStream(candle);
+        try {
+          this.candleStore.upsertFromStream(candle);
+        } catch (error) {
+          console.error(`[ws] Failed to process candle stream event: ${formatStreamError(error)}`);
+        }
       },
       (feed, reason) => {
         console.error(`[ws] ${feed} subscription failed: ${reason instanceof Error ? reason.message : String(reason)}`);
@@ -118,7 +140,13 @@ export class WebsocketRunner {
 
       await this.subscriptionGateway.subscribeAccount(
         accountAddress,
-        (event: HyperliquidAccountStreamEvent) => liveBroker.enqueueRemoteEvent(event),
+        (event: HyperliquidAccountStreamEvent) => {
+          try {
+            liveBroker.enqueueRemoteEvent(event);
+          } catch (error) {
+            console.error(`[ws] Failed to enqueue account stream event: ${formatStreamError(error)}`);
+          }
+        },
         (feed, reason) => liveBroker.markRemoteSubscriptionFailed(feed, reason),
       );
     }

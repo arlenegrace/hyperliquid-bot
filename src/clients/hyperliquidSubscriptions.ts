@@ -286,8 +286,23 @@ export class HyperliquidSubscriptionGateway {
   async close(): Promise<void> {
     const subscriptions = [...this.subscriptions];
     this.subscriptions.length = 0;
-    await Promise.allSettled(subscriptions.map((subscription) => subscription.unsubscribe()));
-    await this.transport.close();
+
+    const unsubscribeResults = await Promise.allSettled(
+      subscriptions.map((subscription) => subscription.unsubscribe()),
+    );
+    for (const result of unsubscribeResults) {
+      if (result.status === "rejected") {
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        console.error(`[ws] unsubscribe failed during close: ${message}`);
+      }
+    }
+
+    try {
+      await this.transport.close();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[ws] transport close failed: ${message}`);
+    }
   }
 
   private trackSubscription(
@@ -296,8 +311,23 @@ export class HyperliquidSubscriptionGateway {
     onFailure: (feed: string, reason: unknown) => void,
   ): void {
     this.subscriptions.push(subscription);
+
+    let notified = false;
+    const notifyFailure = (reason: unknown): void => {
+      if (notified) {
+        return;
+      }
+
+      notified = true;
+      onFailure(feed, reason);
+    };
+
     subscription.failureSignal.addEventListener("abort", () => {
-      onFailure(feed, subscription.failureSignal.reason);
+      notifyFailure(subscription.failureSignal.reason);
     });
+
+    if (subscription.failureSignal.aborted) {
+      notifyFailure(subscription.failureSignal.reason);
+    }
   }
 }

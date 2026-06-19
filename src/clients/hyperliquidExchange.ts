@@ -328,7 +328,10 @@ export class HyperliquidExchangeGateway {
 
   private getSpotMetaAndAssetCtxs(): Promise<SpotMetaAndAssetCtxsResponse> {
     if (!this.spotMetaAndAssetCtxsCache) {
-      this.spotMetaAndAssetCtxsCache = this.infoClient.spotMetaAndAssetCtxs();
+      this.spotMetaAndAssetCtxsCache = this.infoClient.spotMetaAndAssetCtxs().catch((error: unknown) => {
+        delete this.spotMetaAndAssetCtxsCache;
+        throw error;
+      });
     }
 
     return this.spotMetaAndAssetCtxsCache;
@@ -539,7 +542,15 @@ export class HyperliquidExchangeGateway {
     });
 
     return response.response.data.statuses.map((status, index) => {
-      const spec = specs[index]!;
+      const spec = specs[index];
+      if (!spec) {
+        return {
+          symbol: "UNKNOWN",
+          status: "error" as const,
+          error: "Unexpected response from Hyperliquid: more order statuses than requests.",
+        };
+      }
+
       if (isOrderErrorStatus(status)) {
         return {
           symbol: spec.symbol,

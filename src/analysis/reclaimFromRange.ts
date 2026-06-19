@@ -102,7 +102,7 @@ export function excursionExtremeForStop(
         minLow = Math.min(minLow, candle.low);
       }
     }
-    return minLow;
+    return Number.isFinite(minLow) ? minLow : deviationCandle.low;
   }
 
   let maxHigh = Number.NEGATIVE_INFINITY;
@@ -112,5 +112,5 @@ export function excursionExtremeForStop(
       maxHigh = Math.max(maxHigh, candle.high);
     }
   }
-  return maxHigh;
+  return Number.isFinite(maxHigh) ? maxHigh : deviationCandle.high;
 }
