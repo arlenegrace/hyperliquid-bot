@@ -14,7 +14,6 @@ import { TradingBot } from "./bot.js";
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const RESUBSCRIBE_BASE_DELAY_MS = 5_000;
 const RESUBSCRIBE_MAX_DELAY_MS = 120_000;
-const RESUBSCRIBE_MAX_ATTEMPTS = 20;
 
 function formatStreamError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -218,18 +217,13 @@ export class WebsocketRunner {
       return;
     }
 
-    if (this.resubscribeAttempts >= RESUBSCRIBE_MAX_ATTEMPTS) {
-      console.error(`[ws] Resubscribe abandoned after ${RESUBSCRIBE_MAX_ATTEMPTS} attempts. The bot will continue operating using REST reconciliation only.`);
-      return;
-    }
-
     const delayMs = Math.min(
       RESUBSCRIBE_BASE_DELAY_MS * Math.pow(2, this.resubscribeAttempts),
       RESUBSCRIBE_MAX_DELAY_MS,
     );
     this.resubscribeAttempts += 1;
 
-    console.log(`[ws] Scheduling resubscribe in ${Math.round(delayMs / 1000)}s (attempt ${this.resubscribeAttempts}/${RESUBSCRIBE_MAX_ATTEMPTS}, reason: ${reason}).`);
+    console.log(`[ws] Scheduling resubscribe in ${Math.round(delayMs / 1000)}s (attempt ${this.resubscribeAttempts}, reason: ${reason}).`);
 
     this.resubscribeTimer = setTimeout(() => {
       this.resubscribeTimer = undefined;
