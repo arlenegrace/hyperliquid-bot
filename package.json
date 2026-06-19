@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "backtest:compare": "tsx src/backtest/runStrategyComparison.ts",
+    "reconcile": "tsx src/tools/reconcileState.ts",
     "check": "tsx src/index.ts --once",
     "dev": "tsx src/index.ts",
     "start": "node dist/src/index.js",

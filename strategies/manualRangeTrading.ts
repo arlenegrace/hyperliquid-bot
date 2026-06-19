@@ -315,12 +315,14 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
 
     const reclaimEvent = findLatestManualReclaimEvent(activeCandles, state, range.low, range.high);
     if (reclaimEvent) {
-      const hasPendingSameSidePosition = context.openPositions.some(
-        (position) => position.side === reclaimEvent.side && position.entryOrders.some((order) => order.status === "pending"),
+      const hasActiveSameSidePosition = context.openPositions.some(
+        (position) =>
+          position.side === reclaimEvent.side &&
+          (position.status === "open" || position.entryOrders.some((order) => order.status === "pending")),
       );
-      if (hasPendingSameSidePosition) {
+      if (hasActiveSameSidePosition) {
         notes.push(
-          `${context.symbol}: skipped ${reclaimEvent.side} reclaim because a same-side pending order plan is already active.`,
+          `${context.symbol}: skipped ${reclaimEvent.side} reclaim because a same-side position is already active.`,
         );
         return {
           notes,
@@ -432,16 +434,20 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
       }
     }
 
-    const hasPendingLongPlan = context.openPositions.some(
-      (position) => position.side === "long" && position.entryOrders.some((order) => order.status === "pending"),
+    const hasActiveLongPosition = context.openPositions.some(
+      (position) =>
+        position.side === "long" &&
+        (position.status === "open" || position.entryOrders.some((order) => order.status === "pending")),
     );
-    const hasPendingShortPlan = context.openPositions.some(
-      (position) => position.side === "short" && position.entryOrders.some((order) => order.status === "pending"),
+    const hasActiveShortPosition = context.openPositions.some(
+      (position) =>
+        position.side === "short" &&
+        (position.status === "open" || position.entryOrders.some((order) => order.status === "pending")),
     );
 
     const longEdgeTrigger =
       state.edgeReentryEnabledLong &&
-      !hasPendingLongPlan &&
+      !hasActiveLongPosition &&
       previousCandle !== undefined &&
       previousCandle.close < range.mid &&
       signalCandle.close >= range.mid;
@@ -516,7 +522,7 @@ export class ManualRangeTradingStrategy implements TradingStrategy {
 
     const shortEdgeTrigger =
       state.edgeReentryEnabledShort &&
-      !hasPendingShortPlan &&
+      !hasActiveShortPosition &&
       previousCandle !== undefined &&
       previousCandle.close > range.mid &&
       signalCandle.close <= range.mid;

@@ -3,7 +3,7 @@ import {
   findLastCloseInsideRangeIndex,
   findLatestReclaimEvent,
 } from "../src/analysis/reclaimFromRange.js";
-import { formatPerpPriceForConsole, wrapOrange } from "../src/consoleFormat.js";
+import { formatPerpPriceForConsole, wrapGreen, wrapOrange } from "../src/consoleFormat.js";
 import { buildManualRangeSnapshot } from "../src/manualRanges.js";
 import type {
   StrategyContext,
@@ -81,7 +81,7 @@ export class ManualRangeTradingV3Strategy implements TradingStrategy {
 
       return {
         notes: [
-          `${context.symbol}: manual v3 long reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} (excursion-based stop).`,
+          wrapGreen(`${context.symbol}: manual v3 long reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} (excursion-based stop).`),
         ],
         signal: {
           strategyId: this.id,
@@ -108,7 +108,7 @@ export class ManualRangeTradingV3Strategy implements TradingStrategy {
 
     return {
       notes: [
-        `${context.symbol}: manual v3 short reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} (excursion-based stop).`,
+        wrapGreen(`${context.symbol}: manual v3 short reclaim confirmed inside range ${formatPerpPriceForConsole(range.low)} - ${formatPerpPriceForConsole(range.high)} (excursion-based stop).`),
       ],
       signal: {
         strategyId: this.id,

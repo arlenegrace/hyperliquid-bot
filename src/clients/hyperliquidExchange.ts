@@ -41,6 +41,13 @@ export interface HyperliquidOpenOrder {
   timestamp: number;
 }
 
+export interface HyperliquidFrontendOpenOrder extends HyperliquidOpenOrder {
+  isTrigger: boolean;
+  triggerPx: number;
+  orderType: string;
+  isPositionTpsl: boolean;
+}
+
 export interface HyperliquidFill {
   symbol: string;
   side: TradeSide;
@@ -395,6 +402,11 @@ export class HyperliquidExchangeGateway {
     return 0;
   }
 
+  async fetchUserRateLimit(accountAddress: `0x${string}`): Promise<{ used: number; cap: number }> {
+    const result = await this.infoClient.userRateLimit({ user: accountAddress });
+    return { used: result.nRequestsUsed, cap: result.nRequestsCap };
+  }
+
   async fetchAccountSnapshot(accountAddress: `0x${string}`): Promise<HyperliquidAccountSnapshot> {
     const [abstraction, state] = await Promise.all([
       this.infoClient.userAbstraction({ user: accountAddress }),
@@ -440,7 +452,31 @@ export class HyperliquidExchangeGateway {
 
   async fetchOpenOrders(accountAddress: `0x${string}`): Promise<HyperliquidOpenOrder[]> {
     const orders = await this.infoClient.openOrders({ user: accountAddress });
+    return orders.map((order) => this.normalizeOpenOrder(order));
+  }
+
+  async fetchFrontendOpenOrders(accountAddress: `0x${string}`): Promise<HyperliquidFrontendOpenOrder[]> {
+    const orders = await this.infoClient.frontendOpenOrders({ user: accountAddress });
     return orders.map((order) => ({
+      ...this.normalizeOpenOrder(order),
+      isTrigger: order.isTrigger,
+      triggerPx: parseNumber(order.triggerPx),
+      orderType: order.orderType,
+      isPositionTpsl: order.isPositionTpsl,
+    }));
+  }
+
+  private normalizeOpenOrder(order: {
+    coin: string;
+    side: "B" | "A";
+    limitPx: string;
+    sz: string;
+    oid: number;
+    cloid?: `0x${string}` | null;
+    timestamp: number;
+    reduceOnly?: boolean;
+  }): HyperliquidOpenOrder {
+    return {
       symbol: order.coin.toUpperCase(),
       side: normalizeTradeSide(order.side),
       price: parseNumber(order.limitPx),
@@ -449,7 +485,7 @@ export class HyperliquidExchangeGateway {
       orderId: order.oid,
       ...(order.cloid ? { clientOrderId: order.cloid } : {}),
       timestamp: order.timestamp,
-    }));
+    };
   }
 
   async fetchFillsSince(accountAddress: `0x${string}`, startTime: number, endTime?: number): Promise<HyperliquidFill[]> {

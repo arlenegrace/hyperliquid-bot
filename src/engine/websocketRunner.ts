@@ -165,6 +165,9 @@ export class WebsocketRunner {
           this.candleStore.markProcessed(symbol, latest.closeTime);
         }
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[ws] Candle close cycle failed (will retry next cycle): ${message}`);
     } finally {
       this.processing = false;
       this.scheduleNextCandleClose();

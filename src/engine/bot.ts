@@ -206,8 +206,12 @@ export class TradingBot {
   private async logCycleSummary(): Promise<void> {
     await this.broker.prepareSnapshot();
     const snapshot = this.broker.snapshot();
+    const rateLimitSuffix =
+      snapshot.apiActionsUsed !== undefined && snapshot.apiActionsCap !== undefined
+        ? ` API actions: ${snapshot.apiActionsUsed}/${snapshot.apiActionsCap} (${snapshot.apiActionsCap - snapshot.apiActionsUsed} remaining).`
+        : "";
     console.log(
-      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.unrealizedPnlUsd, { suffix: " USD" })}, all time PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.allTimePnlUsd, { suffix: "" })}, account equity: $${snapshot.equityUsd.toFixed(2)}.`,
+      `[bot] ${formatBotCycleTimestamp()}: Cycle finished. Open positions: ${snapshot.openPositions.length}, closed positions: ${snapshot.closedPositions.length}, unrealized PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.unrealizedPnlUsd, { suffix: " USD" })}, all time PnL: ${formatSignedUsdWithDollarPrefixColored(snapshot.allTimePnlUsd, { suffix: "" })}, account equity: $${snapshot.equityUsd.toFixed(2)}.${rateLimitSuffix}`,
     );
   }
 

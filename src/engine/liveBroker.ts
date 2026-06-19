@@ -126,6 +126,7 @@ export class HyperliquidLiveBroker implements Broker {
   private readonly cancelledPositions: BrokerPosition[] = [];
   private readonly lastMarks = new Map<string, number>();
   private readonly lastExchangeUnrealizedBySymbol = new Map<string, number>();
+  private readonly exchangePositionSymbols = new Set<string>();
   private readonly processedTradeIds = new Set<number>();
 
   private accountAddress?: `0x${string}`;
@@ -153,6 +154,8 @@ export class HyperliquidLiveBroker implements Broker {
   private lifetimeFundingUsd = 0;
   /** Latest `allTime` portfolio PnL from the exchange (prepareSnapshot). */
   private portfolioAllTimePnlUsd = 0;
+  private apiActionsUsed?: number;
+  private apiActionsCap?: number;
   private nextProtectiveOrderSequence = 1;
   private protectiveOrdersDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   private protectiveOrdersDebounceWaiters: Array<(logs: string[]) => void> = [];
@@ -229,20 +232,27 @@ export class HyperliquidLiveBroker implements Broker {
     if (this.usesWebsocketRuntime()) {
       await this.drainRemoteEvents();
       await this.runSparseReconcileIfDue("scheduled websocket snapshot reconciliation");
-      return;
+    } else {
+      const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
+      this.applyAccountSnapshotPricing(accountSnapshot);
+
+      try {
+        this.lifetimeFundingUsd = await this.gateway.fetchUserLifetimeFundingUsd(this.accountAddress);
+      } catch {
+        // Keep last known value on transient API errors.
+      }
+
+      try {
+        this.portfolioAllTimePnlUsd = await this.gateway.fetchPortfolioAllTimePnlUsd(this.accountAddress);
+      } catch {
+        // Keep last known value on transient API errors.
+      }
     }
 
-    const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
-    this.applyAccountSnapshotPricing(accountSnapshot);
-
     try {
-      this.lifetimeFundingUsd = await this.gateway.fetchUserLifetimeFundingUsd(this.accountAddress);
-    } catch {
-      // Keep last known value on transient API errors.
-    }
-
-    try {
-      this.portfolioAllTimePnlUsd = await this.gateway.fetchPortfolioAllTimePnlUsd(this.accountAddress);
+      const rateLimit = await this.gateway.fetchUserRateLimit(this.accountAddress);
+      this.apiActionsUsed = rateLimit.used;
+      this.apiActionsCap = rateLimit.cap;
     } catch {
       // Keep last known value on transient API errors.
     }
@@ -279,6 +289,8 @@ export class HyperliquidLiveBroker implements Broker {
       openPositions: [...this.openPositions.values()].map(clonePosition),
       closedPositions: this.closedPositions.map(clonePosition),
       cancelledPositions: this.cancelledPositions.map(clonePosition),
+      ...(this.apiActionsUsed !== undefined ? { apiActionsUsed: this.apiActionsUsed } : {}),
+      ...(this.apiActionsCap !== undefined ? { apiActionsCap: this.apiActionsCap } : {}),
     };
   }
 
@@ -313,8 +325,10 @@ export class HyperliquidLiveBroker implements Broker {
   private applyAccountSnapshotPricing(accountSnapshot: HyperliquidAccountSnapshot): void {
     this.currentAccountValueUsd = accountSnapshot.accountValueUsd;
     this.lastExchangeUnrealizedBySymbol.clear();
+    this.exchangePositionSymbols.clear();
     for (const [symbol, pos] of accountSnapshot.positionsBySymbol) {
       this.lastExchangeUnrealizedBySymbol.set(symbol, pos.unrealizedPnlUsd);
+      this.exchangePositionSymbols.add(symbol);
     }
   }
 
@@ -519,6 +533,13 @@ export class HyperliquidLiveBroker implements Broker {
       ];
     }
 
+    if (this.exchangePositionSymbols.has(signal.symbol) && signal.entryMode !== "flip") {
+      return [
+        ...logs,
+        `${signal.symbol}: skipped live order because the exchange already has an open position for this symbol that is not tracked locally. Reconcile the account before opening new positions.`,
+      ];
+    }
+
     logs.push(...(await this.flattenOpposingExposure(signal)));
 
     const exitOrders = signal.exitOrders.map((order) => ({
@@ -709,6 +730,12 @@ export class HyperliquidLiveBroker implements Broker {
     }
 
     const events = this.remoteEventQueue.splice(0).sort((left, right) => left.receivedAt - right.receivedAt);
+    let latestEventTimestamp = 0;
+
+    // Phase 1: Apply all state updates (order IDs, fills, pricing) without reconciliation.
+    // Fills must be recorded before reconciliation runs, otherwise a position whose entry
+    // orders are no longer "open" on the exchange (because they filled) looks like an
+    // expired ladder and gets cancelled before the fill event is processed.
     for (const event of events) {
       if (event.type === "subscriptionFailure") {
         this.remoteStreamFailedReason = `${event.feed}: ${event.message}`;
@@ -717,6 +744,7 @@ export class HyperliquidLiveBroker implements Broker {
       }
 
       this.lastAccountStreamEventAt = event.receivedAt;
+      latestEventTimestamp = Math.max(latestEventTimestamp, event.receivedAt);
 
       if (event.type === "clearinghouseState") {
         this.applyAccountSnapshotPricing(event.snapshot);
@@ -725,17 +753,16 @@ export class HyperliquidLiveBroker implements Broker {
 
       if (event.type === "openOrders") {
         this.applyOpenOrdersSnapshot(event.orders);
-        logs.push(...this.reconcileTrackedPositionsFromOrderState(event.receivedAt));
         continue;
       }
 
       if (event.type === "orderUpdates") {
-        logs.push(...this.applyOrderUpdates(event.updates, event.receivedAt));
+        this.applyOrderUpdatesWithoutReconcile(event.updates);
         continue;
       }
 
       if (event.type === "fills") {
-        logs.push(...this.applyRemoteFills(event.fills, event.receivedAt));
+        logs.push(...this.applyRemoteFillsWithoutReconcile(event.fills));
         continue;
       }
 
@@ -748,6 +775,11 @@ export class HyperliquidLiveBroker implements Broker {
       }
     }
 
+    // Phase 2: Single reconciliation pass after all fills and order states are applied.
+    if (latestEventTimestamp > 0) {
+      logs.push(...this.reconcileTrackedPositionsFromOrderState(latestEventTimestamp));
+    }
+
     logs.push(...(await this.ensureProtectiveOrders()));
     this.trimProcessedTradeIds();
     await this.recordEquity(Object.fromEntries(this.lastMarks.entries()));
@@ -756,6 +788,12 @@ export class HyperliquidLiveBroker implements Broker {
   }
 
   private applyRemoteFills(fills: HyperliquidFill[], timestamp: number): string[] {
+    const logs = this.applyRemoteFillsWithoutReconcile(fills);
+    logs.push(...this.reconcileTrackedPositionsFromOrderState(timestamp));
+    return logs;
+  }
+
+  private applyRemoteFillsWithoutReconcile(fills: HyperliquidFill[]): string[] {
     const logs: string[] = [];
     const knownOrdersByClientOrderId = this.buildKnownOrdersByClientOrderId();
     const unprocessedFills = fills
@@ -790,11 +828,15 @@ export class HyperliquidLiveBroker implements Broker {
       this.processedTradeIds.add(fill.tradeId);
     }
 
-    logs.push(...this.reconcileTrackedPositionsFromOrderState(timestamp));
     return logs;
   }
 
   private applyOrderUpdates(updates: HyperliquidOrderUpdate[], timestamp: number): string[] {
+    this.applyOrderUpdatesWithoutReconcile(updates);
+    return this.reconcileTrackedPositionsFromOrderState(timestamp);
+  }
+
+  private applyOrderUpdatesWithoutReconcile(updates: HyperliquidOrderUpdate[]): void {
     for (const update of updates) {
       const clientOrderId = update.order.clientOrderId;
       if (update.status === "open" || update.status === "triggered") {
@@ -810,8 +852,6 @@ export class HyperliquidLiveBroker implements Broker {
       }
       this.openExchangeOrderOids.delete(update.order.orderId);
     }
-
-    return this.reconcileTrackedPositionsFromOrderState(timestamp);
   }
 
   private reconcileTrackedPositionsFromOrderState(timestamp: number): string[] {

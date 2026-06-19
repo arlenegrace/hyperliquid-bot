@@ -302,6 +302,8 @@ export interface BrokerSnapshot {
   openPositions: BrokerPosition[];
   closedPositions: BrokerPosition[];
   cancelledPositions: BrokerPosition[];
+  apiActionsUsed?: number;
+  apiActionsCap?: number;
 }
 
 export type PaperBrokerSnapshot = BrokerSnapshot;

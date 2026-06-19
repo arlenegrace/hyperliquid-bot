@@ -4,6 +4,10 @@ export const ANSI_RED = "\u001b[31m";
 /** Truecolor for #ff9800 */
 export const ANSI_ORANGE = "\u001b[38;2;255;152;0m";
 
+export function wrapGreen(text: string): string {
+  return `${ANSI_GREEN}${text}${ANSI_RESET}`;
+}
+
 export function wrapOrange(text: string): string {
   return `${ANSI_ORANGE}${text}${ANSI_RESET}`;
 }
