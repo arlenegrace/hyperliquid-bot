@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -1743,54 +1743,75 @@ export class HyperliquidLiveBroker implements Broker {
     }
   }
 
-  private async loadState(): Promise<void> {
-    const statePath = resolveStatePath(this.config.live.stateFile);
+  private applyStateFromFile(state: LiveBrokerStateFile): void {
+    this.startingBalanceUsd = state.startingBalanceUsd ?? 0;
+    this.realizedPnlUsd = state.realizedPnlUsd ?? 0;
+    this.grossProfitUsd = state.grossProfitUsd ?? 0;
+    this.grossLossUsd = state.grossLossUsd ?? 0;
+    this.totalFeesUsd = state.totalFeesUsd ?? 0;
+    this.wins = state.wins ?? 0;
+    this.losses = state.losses ?? 0;
+    this.peakEquityUsd = state.peakEquityUsd ?? this.startingBalanceUsd;
+    this.maxDrawdownPct = state.maxDrawdownPct ?? 0;
+    this.nextPositionSequence = state.nextPositionSequence ?? 1;
+    this.lastSyncTime = state.lastSyncTime ?? 0;
 
+    for (const [symbol, price] of Object.entries(state.lastMarks ?? {})) {
+      this.lastMarks.set(symbol, price);
+    }
+
+    for (const tradeId of state.processedTradeIds ?? []) {
+      this.processedTradeIds.add(tradeId);
+    }
+
+    for (const position of state.openPositions ?? []) {
+      this.openPositions.set(position.id, clonePosition(position));
+    }
+
+    for (const position of state.closedPositions ?? []) {
+      this.closedPositions.push(clonePosition(position));
+    }
+
+    for (const position of state.cancelledPositions ?? []) {
+      this.cancelledPositions.push(clonePosition(position));
+    }
+  }
+
+  private async tryReadStateFile(filePath: string): Promise<LiveBrokerStateFile | null> {
     try {
-      const rawFile = await readFile(statePath, "utf8");
-      const state = JSON.parse(rawFile) as LiveBrokerStateFile;
-      this.startingBalanceUsd = state.startingBalanceUsd ?? 0;
-      this.realizedPnlUsd = state.realizedPnlUsd ?? 0;
-      this.grossProfitUsd = state.grossProfitUsd ?? 0;
-      this.grossLossUsd = state.grossLossUsd ?? 0;
-      this.totalFeesUsd = state.totalFeesUsd ?? 0;
-      this.wins = state.wins ?? 0;
-      this.losses = state.losses ?? 0;
-      this.peakEquityUsd = state.peakEquityUsd ?? this.startingBalanceUsd;
-      this.maxDrawdownPct = state.maxDrawdownPct ?? 0;
-      this.nextPositionSequence = state.nextPositionSequence ?? 1;
-      this.lastSyncTime = state.lastSyncTime ?? 0;
-
-      for (const [symbol, price] of Object.entries(state.lastMarks ?? {})) {
-        this.lastMarks.set(symbol, price);
-      }
-
-      for (const tradeId of state.processedTradeIds ?? []) {
-        this.processedTradeIds.add(tradeId);
-      }
-
-      for (const position of state.openPositions ?? []) {
-        this.openPositions.set(position.id, clonePosition(position));
-      }
-
-      for (const position of state.closedPositions ?? []) {
-        this.closedPositions.push(clonePosition(position));
-      }
-
-      for (const position of state.cancelledPositions ?? []) {
-        this.cancelledPositions.push(clonePosition(position));
-      }
+      const rawFile = await readFile(filePath, "utf8");
+      return JSON.parse(rawFile) as LiveBrokerStateFile;
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-        return;
+        return null;
       }
-
-      if (error instanceof SyntaxError) {
-        console.error(`[live-broker] State file ${statePath} contains invalid JSON. Starting with empty state. The corrupt file has NOT been deleted — back it up manually if needed.`);
-        return;
-      }
-
       throw error;
+    }
+  }
+
+  private async loadState(): Promise<void> {
+    const statePath = resolveStatePath(this.config.live.stateFile);
+    const backupPath = statePath + ".bak";
+
+    try {
+      const state = await this.tryReadStateFile(statePath);
+      if (state !== null) {
+        this.applyStateFromFile(state);
+        return;
+      }
+    } catch {
+      console.error(`[live-broker] State file ${statePath} is corrupt. Attempting to load backup.`);
+      try {
+        const backup = await this.tryReadStateFile(backupPath);
+        if (backup !== null) {
+          this.applyStateFromFile(backup);
+          console.log(`[live-broker] Recovered state from backup ${backupPath}.`);
+          return;
+        }
+      } catch {
+        console.error(`[live-broker] Backup file ${backupPath} is also corrupt. Starting with empty state.`);
+        return;
+      }
     }
   }
 
@@ -1815,9 +1836,18 @@ export class HyperliquidLiveBroker implements Broker {
       cancelledPositions: this.cancelledPositions.map(clonePosition),
     };
 
+    const tmpPath = statePath + ".tmp";
+    const backupPath = statePath + ".bak";
+
     try {
       await mkdir(path.dirname(statePath), { recursive: true });
-      await writeFile(statePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      await writeFile(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      try {
+        await rename(statePath, backupPath);
+      } catch {
+        // No existing state file to back up — first save.
+      }
+      await rename(tmpPath, statePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[live-broker] Failed to persist state to ${statePath}: ${message}`);

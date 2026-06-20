@@ -12,6 +12,8 @@ import { HyperliquidLiveBroker } from "./liveBroker.js";
 import { TradingBot } from "./bot.js";
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const BOOTSTRAP_BASE_DELAY_MS = 5_000;
+const BOOTSTRAP_MAX_DELAY_MS = 120_000;
 const RESUBSCRIBE_BASE_DELAY_MS = 5_000;
 const RESUBSCRIBE_MAX_DELAY_MS = 120_000;
 
@@ -49,7 +51,7 @@ export class WebsocketRunner {
   }
 
   async start(): Promise<void> {
-    await this.bootstrapCandles();
+    await this.bootstrapWithRetry();
     await this.subscribeStreams();
     this.scheduleNextCandleClose();
     this.startStalenessMonitor();
@@ -104,6 +106,27 @@ export class WebsocketRunner {
       useTestnet: this.config.live.useTestnet,
       timeoutMs: this.config.live.orderTimeoutMs,
     });
+  }
+
+  private async bootstrapWithRetry(): Promise<void> {
+    let attempts = 0;
+    while (true) {
+      try {
+        await this.bootstrapCandles();
+        if (attempts > 0) {
+          console.log(`[boot] Bootstrap succeeded after ${attempts} failed attempt(s).`);
+        }
+        return;
+      } catch (error) {
+        attempts += 1;
+        const delayMs = Math.min(
+          BOOTSTRAP_BASE_DELAY_MS * Math.pow(2, attempts - 1),
+          BOOTSTRAP_MAX_DELAY_MS,
+        );
+        console.error(`[boot] Bootstrap attempt ${attempts} failed: ${formatStreamError(error)}. Retrying in ${Math.round(delayMs / 1000)}s...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 
   private get candleCachePath(): string {
