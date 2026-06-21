@@ -1,8 +1,6 @@
 {
   "apiBaseUrl": "https://api.hyperliquid.xyz",
   "watchlist": ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
-  "pollIntervalMs": 3600000,
-  "runtimeMode": "websocket",
   "websocket": {
     "candleCloseGraceMs": 10000,
     "candleBatchDebounceMs": 5000,

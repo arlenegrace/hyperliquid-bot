@@ -188,8 +188,6 @@ All settings live in `config.json` (copy from `config.example.json`).
 {
   "apiBaseUrl": "https://api.hyperliquid.xyz",
   "watchlist": ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
-  "pollIntervalMs": 3600000,
-  "runtimeMode": "websocket",
   "websocket": {
     "candleCloseGraceMs": 10000,
     "candleBatchDebounceMs": 5000,
@@ -228,8 +226,6 @@ All settings live in `config.json` (copy from `config.example.json`).
 
 | Setting                   | Description                                                |
 | ------------------------- | ---------------------------------------------------------- |
-| `runtimeMode`             | `"websocket"` for event-driven watch mode, `"poll"` for rollback |
-| `pollIntervalMs`          | REST polling cadence when `runtimeMode` is `"poll"`        |
 | `executionMode`           | `"paper"` for simulation, `"live"` for real trading        |
 | `activeStrategyId`        | Which strategy to run (default: `manual-range-trading-v3`) |
 | `positionSizeUsd`         | Fixed dollar amount per trade (used by v1)                 |
