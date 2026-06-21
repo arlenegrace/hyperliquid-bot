@@ -3,7 +3,6 @@ export type TradeSide = "long" | "short";
 export type RangeSource = "manual";
 export type OrderStatus = "pending" | "filled" | "cancelled";
 export type ExecutionMode = "paper" | "live";
-export type RuntimeMode = "websocket" | "poll";
 export type MarginMode = "cross" | "isolated";
 export type LeverageSetting = number | "max";
 export type ActiveStrategyId =
@@ -161,8 +160,6 @@ export interface BotConfig {
   apiBaseUrl: string;
   interval: CandleInterval;
   watchlist: string[];
-  pollIntervalMs: number;
-  runtimeMode: RuntimeMode;
   websocket: WebsocketRuntimeConfig;
   executionMode: ExecutionMode;
   activeStrategyId: ActiveStrategyId;

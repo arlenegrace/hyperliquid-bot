@@ -214,13 +214,9 @@ export class HyperliquidLiveBroker implements Broker {
 
   async onCycleStart(): Promise<string[]> {
     await this.assertInitialized();
-    if (this.usesWebsocketRuntime()) {
-      const logs = await this.drainRemoteEvents();
-      logs.push(...(await this.runSparseReconcileIfDue("scheduled websocket safety reconciliation")));
-      return logs;
-    }
-
-    return this.syncRemoteState();
+    const logs = await this.drainRemoteEvents();
+    logs.push(...(await this.runSparseReconcileIfDue("scheduled safety reconciliation")));
+    return logs;
   }
 
   async prepareSnapshot(): Promise<void> {
@@ -229,25 +225,8 @@ export class HyperliquidLiveBroker implements Broker {
       return;
     }
 
-    if (this.usesWebsocketRuntime()) {
-      await this.drainRemoteEvents();
-      await this.runSparseReconcileIfDue("scheduled websocket snapshot reconciliation");
-    } else {
-      const accountSnapshot = await this.gateway.fetchAccountSnapshot(this.accountAddress);
-      this.applyAccountSnapshotPricing(accountSnapshot);
-
-      try {
-        this.lifetimeFundingUsd = await this.gateway.fetchUserLifetimeFundingUsd(this.accountAddress);
-      } catch {
-        // Keep last known value on transient API errors.
-      }
-
-      try {
-        this.portfolioAllTimePnlUsd = await this.gateway.fetchPortfolioAllTimePnlUsd(this.accountAddress);
-      } catch {
-        // Keep last known value on transient API errors.
-      }
-    }
+    await this.drainRemoteEvents();
+    await this.runSparseReconcileIfDue("scheduled snapshot reconciliation");
 
     try {
       const rateLimit = await this.gateway.fetchUserRateLimit(this.accountAddress);
@@ -635,23 +614,18 @@ export class HyperliquidLiveBroker implements Broker {
     }
 
     await this.saveState();
-    if (this.usesWebsocketRuntime()) {
-      const needsConfirmation = results.some((result) => result.status === "filled" || result.status === "waitingForFill");
-      if (needsConfirmation) {
-        const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
-        logs.push(...(await this.drainRemoteEvents()));
-        if (!eventArrived) {
-          logs.push(`${position.symbol}: websocket fill confirmation did not arrive after entry placement; falling back to one REST reconciliation.`);
-          logs.push(...(await this.syncRemoteState()));
-        }
-      } else {
-        logs.push(...(await this.drainRemoteEvents()));
+    const needsConfirmation = results.some((result) => result.status === "filled" || result.status === "waitingForFill");
+    if (needsConfirmation) {
+      const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
+      logs.push(...(await this.drainRemoteEvents()));
+      if (!eventArrived) {
+        logs.push(`${position.symbol}: websocket fill confirmation did not arrive after entry placement; falling back to one REST reconciliation.`);
+        logs.push(...(await this.syncRemoteState()));
       }
-      logs.push(...(await this.ensureProtectiveOrders()));
     } else {
-      logs.push(...(await this.syncRemoteState()));
-      logs.push(...(await this.ensureProtectiveOrders()));
+      logs.push(...(await this.drainRemoteEvents()));
     }
+    logs.push(...(await this.ensureProtectiveOrders()));
     await this.saveState();
 
     return logs;
@@ -693,13 +667,9 @@ export class HyperliquidLiveBroker implements Broker {
         return logs;
       }
       logs.push(`${position.symbol}: submitted reduce-only market close for ${position.id}.`);
-      if (this.usesWebsocketRuntime()) {
-        const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
-        logs.push(...(await this.drainRemoteEvents()));
-        if (!eventArrived) {
-          logs.push(...(await this.syncRemoteState()));
-        }
-      } else {
+      const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
+      logs.push(...(await this.drainRemoteEvents()));
+      if (!eventArrived) {
         logs.push(...(await this.syncRemoteState()));
       }
     } else {
@@ -883,7 +853,7 @@ export class HyperliquidLiveBroker implements Broker {
   }
 
   private async runSparseReconcileIfDue(reason: string): Promise<string[]> {
-    if (!this.usesWebsocketRuntime() || this.config.websocket.safetyReconcileMs <= 0) {
+    if (this.config.websocket.safetyReconcileMs <= 0) {
       return [];
     }
 
@@ -905,12 +875,8 @@ export class HyperliquidLiveBroker implements Broker {
     return logs;
   }
 
-  private usesWebsocketRuntime(): boolean {
-    return this.config.runtimeMode === "websocket";
-  }
-
   private accountStreamIsStale(now = Date.now()): boolean {
-    return this.usesWebsocketRuntime() && now - this.lastAccountStreamEventAt > this.config.websocket.accountDataStaleMs;
+    return now - this.lastAccountStreamEventAt > this.config.websocket.accountDataStaleMs;
   }
 
   private waitForRemoteEvent(timeoutMs: number): Promise<boolean> {
@@ -1498,13 +1464,9 @@ export class HyperliquidLiveBroker implements Broker {
       }
     }
 
-    if (this.usesWebsocketRuntime()) {
-      const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
-      logs.push(...(await this.drainRemoteEvents()));
-      if (!eventArrived) {
-        logs.push(...(await this.syncRemoteState()));
-      }
-    } else {
+    const eventArrived = await this.waitForRemoteEvent(this.config.websocket.postWriteEventWaitMs);
+    logs.push(...(await this.drainRemoteEvents()));
+    if (!eventArrived) {
       logs.push(...(await this.syncRemoteState()));
     }
     return logs;

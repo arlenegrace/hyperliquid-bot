@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const brokerLogs = await broker.initialize();
 
   console.log(
-    `[boot] Hyperliquid ${config.executionMode} bot started in ${runOnceMode ? "single-run" : config.runtimeMode} mode.`,
+    `[boot] Hyperliquid ${config.executionMode} bot started in ${runOnceMode ? "single-run" : "websocket"} mode.`,
   );
   for (const logLine of brokerLogs) {
     console.log(`[boot] ${logLine}`);
@@ -71,51 +71,14 @@ async function main(): Promise<void> {
   });
   console.log(`[boot] Manual range coverage: ${rangeStatuses.join(", ")}`);
 
-  let cycleRunning = false;
-
-  const executeCycle = async (): Promise<void> => {
-    if (cycleRunning) {
-      console.log("[bot] Previous cycle still running, skipping this tick.");
-      return;
-    }
-
-    cycleRunning = true;
-    try {
-      await bot.runOnce();
-    } catch (error) {
-      console.error(`[bot] Cycle failed: ${formatError(error)}`);
-      if (runOnceMode) {
-        throw error;
-      }
-    } finally {
-      cycleRunning = false;
-    }
-  };
-
-  if (!runOnceMode && config.runtimeMode === "websocket") {
-    const runner = new WebsocketRunner(config, marketDataClient, broker, bot);
-    await runner.start();
-    process.exit(0);
-  }
-
-  await executeCycle();
-
   if (runOnceMode) {
+    await bot.runOnce();
     return;
   }
 
-  const timer = setInterval(() => {
-    void executeCycle();
-  }, config.pollIntervalMs);
-
-  const shutdown = (): void => {
-    clearInterval(timer);
-    console.log("[boot] Shutdown requested. Exiting bot loop.");
-    process.exit(0);
-  };
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  const runner = new WebsocketRunner(config, marketDataClient, broker, bot);
+  await runner.start();
+  process.exit(0);
 }
 
 main().catch((error) => {

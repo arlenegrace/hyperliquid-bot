@@ -35,8 +35,6 @@ const activeStrategyIdSchema = z
   .enum(["manual-range-trading-v1", "manual-range-trading-v2", "manual-range-trading-v3"])
   .transform((value) => value as ActiveStrategyId);
 
-const runtimeModeSchema = z.enum(["websocket", "poll"]);
-
 const websocketConfigSchema = z
   .object({
     candleCloseGraceMs: z.coerce.number().int().min(0).max(5 * 60_000).optional(),
@@ -54,8 +52,6 @@ const configFileSchema = z
   .object({
     apiBaseUrl: z.string().url().optional(),
     watchlist: z.array(z.string()).optional(),
-    pollIntervalMs: z.coerce.number().int().min(5_000).optional(),
-    runtimeMode: runtimeModeSchema.optional(),
     websocket: websocketConfigSchema.optional(),
     executionMode: z.enum(["paper", "live"]).optional(),
     activeStrategyId: activeStrategyIdSchema.optional(),
@@ -99,8 +95,6 @@ const configFileSchema = z
 const fullConfigSchema = z.object({
   apiBaseUrl: z.string().url(),
   watchlist: z.array(z.string()).min(1, "watchlist must contain at least one symbol."),
-  pollIntervalMs: z.coerce.number().int().min(5_000),
-  runtimeMode: runtimeModeSchema,
   websocket: websocketConfigSchema.required({
     candleCloseGraceMs: true,
     candleBatchDebounceMs: true,
@@ -160,8 +154,6 @@ type ConfigPatch = {
 const defaultConfig: FullConfig = {
   apiBaseUrl: "https://api.hyperliquid.xyz",
   watchlist: ["BTC", "ETH", "SOL", "CRV", "BNB", "XRP", "SUI"],
-  pollIntervalMs: 3_600_000,
-  runtimeMode: "websocket",
   websocket: {
     candleCloseGraceMs: 10_000,
     candleBatchDebounceMs: 5_000,
@@ -246,12 +238,6 @@ function legacyEnvPatch(env: NodeJS.ProcessEnv): ConfigPatch {
     patch.watchlist = env.WATCHLIST.split(",")
       .map((symbol) => symbol.trim().toUpperCase())
       .filter(Boolean);
-  }
-  if (env.POLL_INTERVAL_MS !== undefined && env.POLL_INTERVAL_MS !== "") {
-    patch.pollIntervalMs = z.coerce.number().int().min(5_000).parse(env.POLL_INTERVAL_MS);
-  }
-  if (env.RUNTIME_MODE !== undefined && env.RUNTIME_MODE !== "") {
-    patch.runtimeMode = runtimeModeSchema.parse(env.RUNTIME_MODE);
   }
   if (env.EXECUTION_MODE !== undefined && env.EXECUTION_MODE !== "") {
     patch.executionMode = z.enum(["paper", "live"]).parse(env.EXECUTION_MODE);
@@ -438,8 +424,6 @@ export function loadConfig(): BotConfig {
     apiBaseUrl: parsed.apiBaseUrl,
     interval: "4h",
     watchlist: parsed.watchlist,
-    pollIntervalMs: parsed.pollIntervalMs,
-    runtimeMode: parsed.runtimeMode,
     websocket: parsed.websocket,
     executionMode: parsed.executionMode,
     activeStrategyId: parsed.activeStrategyId,

@@ -14,8 +14,6 @@ function createConfig(overrides: Partial<BotConfig> = {}): BotConfig {
     apiBaseUrl: "https://api.hyperliquid.xyz",
     interval: "4h",
     watchlist: ["BTC"],
-    pollIntervalMs: 60_000,
-    runtimeMode: "websocket",
     websocket: {
       candleCloseGraceMs: 10_000,
       candleBatchDebounceMs: 5_000,

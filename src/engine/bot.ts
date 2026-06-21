@@ -23,8 +23,6 @@ import {
 } from "../manualRanges.js";
 import type { Broker } from "./broker.js";
 
-type ManualRangeReloadTrigger = "poll-cycle" | "websocket-4h-candle";
-
 export class TradingBot {
   private readonly lastProcessedCloseTimeBySymbol = new Map<string, number>();
   private readonly manualRangeStates = new Map<string, ManualRangeState>();
@@ -40,7 +38,7 @@ export class TradingBot {
 
   async runOnce(): Promise<void> {
     await this.ensureManualRangeStatesLoaded();
-    const manualRanges = await this.reloadManualRanges("poll-cycle");
+    const manualRanges = await this.reloadManualRanges();
     for (const logLine of await this.broker.onCycleStart()) {
       console.log(`[broker] ${logLine}`);
     }
@@ -57,7 +55,7 @@ export class TradingBot {
 
   async runForClosedCandles(candlesBySymbol: Map<string, Candle[]>): Promise<void> {
     await this.ensureManualRangeStatesLoaded();
-    const manualRanges = await this.reloadManualRanges("websocket-4h-candle");
+    const manualRanges = await this.reloadManualRanges();
     for (const logLine of await this.broker.onCycleStart()) {
       console.log(`[broker] ${logLine}`);
     }
@@ -215,13 +213,12 @@ export class TradingBot {
     );
   }
 
-  private async reloadManualRanges(trigger: ManualRangeReloadTrigger): Promise<ManualRangeMap> {
+  private async reloadManualRanges(): Promise<ManualRangeMap> {
     const manualRanges = await loadManualRanges(this.config.manualRangeFile);
     const fingerprint = getManualRangeMapFingerprint(manualRanges);
-    const triggerLabel = trigger === "websocket-4h-candle" ? "4h websocket candle close" : "poll cycle";
 
     console.log(
-      `[bot] Reloaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile} (${triggerLabel}).`,
+      `[bot] Reloaded ${Object.keys(manualRanges).length} manual ranges from ${this.config.manualRangeFile}.`,
     );
 
     if (

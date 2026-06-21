@@ -87,7 +87,6 @@ test("loadConfig parses live trading flags and limits", () => {
 test("loadConfig parses websocket runtime settings", () => {
   withEnv(
     {
-      RUNTIME_MODE: "websocket",
       WS_CANDLE_CLOSE_GRACE_MS: "15000",
       WS_CANDLE_BATCH_DEBOUNCE_MS: "2500",
       WS_MARKET_DATA_STALE_MS: "600000",
@@ -98,7 +97,6 @@ test("loadConfig parses websocket runtime settings", () => {
     },
     () => {
       const config = loadConfig();
-      assert.equal(config.runtimeMode, "websocket");
       assert.equal(config.websocket.candleCloseGraceMs, 15_000);
       assert.equal(config.websocket.candleBatchDebounceMs, 2_500);
       assert.equal(config.websocket.marketDataStaleMs, 600_000);
@@ -106,18 +104,6 @@ test("loadConfig parses websocket runtime settings", () => {
       assert.equal(config.websocket.safetyReconcileMs, 0);
       assert.equal(config.websocket.postWriteEventWaitMs, 3_000);
       assert.equal(config.websocket.protectiveOrdersDebounceMs, 1_500);
-    },
-  );
-});
-
-test("loadConfig allows poll runtime fallback", () => {
-  withEnv(
-    {
-      RUNTIME_MODE: "poll",
-    },
-    () => {
-      const config = loadConfig();
-      assert.equal(config.runtimeMode, "poll");
     },
   );
 });
