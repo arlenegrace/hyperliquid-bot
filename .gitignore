@@ -26,6 +26,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Analysis data (downloaded price history)
+analysis/
+
 # Development plans
 docs/
 
