@@ -35,6 +35,7 @@ export class WebsocketRunner {
   private processing = false;
   private stopping = false;
   private resubscribeAttempts = 0;
+  private staleResubscribeTriggered = false;
 
   constructor(
     private readonly config: BotConfig,
@@ -269,6 +270,7 @@ export class WebsocketRunner {
       this.subscriptionGateway = this.createSubscriptionGateway();
       await this.subscribeStreams();
       this.resubscribeAttempts = 0;
+      this.staleResubscribeTriggered = false;
       console.log("[ws] Resubscribe succeeded. All streams are active.");
     } catch (error) {
       console.error(`[ws] Resubscribe failed: ${formatStreamError(error)}`);
@@ -330,6 +332,7 @@ export class WebsocketRunner {
   private startStalenessMonitor(): void {
     this.staleTimer = setInterval(() => {
       const now = Date.now();
+      let anyStale = false;
       for (const symbol of this.config.watchlist) {
         const latestEventTime = this.candleStore.getLatestEventTime(symbol);
         if (latestEventTime === undefined) {
@@ -340,7 +343,13 @@ export class WebsocketRunner {
           console.warn(
             `[ws] ${symbol}: candle stream has been quiet for ${Math.round((now - latestEventTime) / 1000)}s; entries wait for the next confirmed closed candle.`,
           );
+          anyStale = true;
         }
+      }
+
+      if (anyStale && !this.staleResubscribeTriggered) {
+        this.staleResubscribeTriggered = true;
+        this.scheduleResubscribe("stale candle stream");
       }
     }, Math.max(60_000, this.config.websocket.marketDataStaleMs));
   }
